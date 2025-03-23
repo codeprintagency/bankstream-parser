@@ -20,13 +20,6 @@ export const togglePremiumAccess = (): boolean => {
   return newStatus;
 };
 
-// Determines if we're in a development environment
-const isDevelopment = (): boolean => {
-  return process.env.NODE_ENV === 'development' || 
-         window.location.hostname === 'localhost' || 
-         window.location.hostname.includes('127.0.0.1');
-};
-
 // Get the last HTML response for debugging
 export const getLastHtmlResponse = (): string => {
   return ApiService.getLastRawResponse();
@@ -102,30 +95,34 @@ export const parseTransactionsWithAI = async (
       ]
     };
     
-    // Call the proxy method - it will automatically fall back to direct API if needed
-    console.log("Attempting to call Claude API via proxy...");
-    const data = await ApiService.callClaudeApiViaProxy(apiKey, options);
-    
-    console.log("Claude response:", data);
-    
-    if (data && data.content && data.content[0] && data.content[0].text) {
-      const content = data.content[0].text;
-      console.log("Claude content:", content.substring(0, 200) + "...");
+    try {
+      // Call the proxy method
+      const data = await ApiService.callClaudeApiViaProxy(apiKey, options);
       
-      // Try to parse the content as JSON or extract JSON from it
-      try {
-        const transactions: Transaction[] = extractJsonFromResponse(content);
-        console.log(`Parsed ${transactions.length} transactions from Claude response`);
-        return transactions;
-      } catch (jsonError) {
-        console.error('Could not parse JSON in Claude response', jsonError);
-        console.error('Claude response content:', content);
+      console.log("Claude response:", data);
+      
+      if (data && data.content && data.content[0] && data.content[0].text) {
+        const content = data.content[0].text;
+        console.log("Claude content:", content.substring(0, 200) + "...");
         
-        throw new Error('Failed to parse JSON from Claude response');
+        // Try to parse the content as JSON or extract JSON from it
+        try {
+          const transactions: Transaction[] = extractJsonFromResponse(content);
+          console.log(`Parsed ${transactions.length} transactions from Claude response`);
+          return transactions;
+        } catch (jsonError) {
+          console.error('Could not parse JSON in Claude response', jsonError);
+          console.error('Claude response content:', content);
+          
+          throw new Error('Failed to parse JSON from Claude response');
+        }
+      } else {
+        console.error('Invalid Claude response structure:', data);
+        throw new Error('Invalid Claude response structure');
       }
-    } else {
-      console.error('Invalid Claude response structure:', data);
-      throw new Error('Invalid Claude response structure');
+    } catch (proxyError: any) {
+      console.error('API request failed:', proxyError);
+      throw new Error(proxyError.message || 'Unknown proxy error occurred');
     }
   } catch (error: any) {
     console.error('Error parsing with AI:', error);

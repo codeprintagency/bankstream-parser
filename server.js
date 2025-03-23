@@ -16,6 +16,10 @@ app.use((req, res, next) => {
   next();
 });
 
+// Body parser middleware - configure before CORS and other middleware
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
 // CORS middleware for all requests
 app.use((req, res, next) => {
   // Set CORS headers for all responses
@@ -33,11 +37,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Body parser middleware
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
-
-// Proxy middleware for Claude API - improved configuration
+// Proxy middleware for Claude API with improved error handling
 app.use('/api/claude', createProxyMiddleware({
   target: 'https://api.anthropic.com',
   changeOrigin: true,
@@ -53,33 +53,33 @@ app.use('/api/claude', createProxyMiddleware({
     proxyReq.removeHeader('origin');
     proxyReq.removeHeader('referer');
     
-    // Set important headers
+    // Always include essential headers
     if (req.headers['x-api-key']) {
       proxyReq.setHeader('x-api-key', req.headers['x-api-key']);
       console.log('Setting x-api-key header');
     }
     
-    if (req.headers['anthropic-version']) {
-      proxyReq.setHeader('anthropic-version', req.headers['anthropic-version']);
-      console.log('Setting anthropic-version header');
-    }
+    proxyReq.setHeader('anthropic-version', req.headers['anthropic-version'] || '2023-06-01');
+    console.log('Setting anthropic-version header');
     
-    if (req.headers['anthropic-dangerous-direct-browser-access']) {
-      proxyReq.setHeader('anthropic-dangerous-direct-browser-access', req.headers['anthropic-dangerous-direct-browser-access']);
-      console.log('Setting anthropic-dangerous-direct-browser-access header');
-    }
-    
-    if (req.headers['content-type']) {
-      proxyReq.setHeader('content-type', req.headers['content-type']);
-      console.log('Setting content-type header');
-    }
+    // Content type is critical
+    proxyReq.setHeader('content-type', 'application/json');
+    console.log('Setting content-type header');
     
     // Log the modified headers
     console.log('Production proxy request headers:', proxyReq.getHeaders());
     
     // Log the request body if it exists
-    if (req.body) {
-      console.log('Request body:', JSON.stringify(req.body, null, 2));
+    if (req.body && Object.keys(req.body).length > 0) {
+      const bodyData = JSON.stringify(req.body);
+      console.log('Request body:', bodyData);
+      
+      // Update content-length to match the body length
+      proxyReq.setHeader('content-length', Buffer.byteLength(bodyData));
+      
+      // Write the body data
+      proxyReq.write(bodyData);
+      proxyReq.end();
     }
   },
   onProxyRes: (proxyRes, req, res) => {
@@ -91,31 +91,26 @@ app.use('/api/claude', createProxyMiddleware({
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, x-api-key, anthropic-version, anthropic-dangerous-direct-browser-access, Authorization');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
     
-    // Make sure we're returning the right content type
-    if (proxyRes.headers['content-type'] && proxyRes.headers['content-type'].includes('application/json')) {
-      res.setHeader('Content-Type', 'application/json');
+    // Make sure we're setting the right content type
+    if (proxyRes.headers['content-type']) {
+      res.setHeader('Content-Type', proxyRes.headers['content-type']);
     }
     
-    // If the response is HTML instead of JSON, log this information
-    if (proxyRes.headers['content-type'] && proxyRes.headers['content-type'].includes('text/html')) {
-      console.log('WARNING: Received HTML instead of JSON from Claude API');
-      
-      // Create a stream to collect the response data
+    // If the status is not 200, log the response body
+    if (proxyRes.statusCode !== 200) {
       let responseBody = '';
       proxyRes.on('data', (chunk) => {
         responseBody += chunk.toString();
       });
       
       proxyRes.on('end', () => {
-        // Log a preview of the HTML response
-        console.log('HTML response preview:', responseBody.substring(0, 1000) + '...');
+        console.log(`Error response from Claude API (${proxyRes.statusCode}):`, responseBody);
       });
     }
   },
   onError: (err, req, res) => {
-    console.error('Proxy error in production:', err);
+    console.error('Proxy error:', err);
     
     // Respond with JSON error instead of HTML
     res.setHeader('Content-Type', 'application/json');

@@ -42,11 +42,6 @@ export default defineConfig(({ mode }) => ({
               console.log('Setting anthropic-version header');
             }
             
-            if (req.headers && req.headers['anthropic-dangerous-direct-browser-access']) {
-              proxyReq.setHeader('anthropic-dangerous-direct-browser-access', req.headers['anthropic-dangerous-direct-browser-access']);
-              console.log('Setting anthropic-dangerous-direct-browser-access header');
-            }
-            
             if (req.headers && req.headers['content-type']) {
               proxyReq.setHeader('content-type', req.headers['content-type']);
               console.log('Setting content-type header');
@@ -85,29 +80,29 @@ export default defineConfig(({ mode }) => ({
               // We want to collect the response to log it for debugging
               let responseBody = '';
               
-              // Override write and end methods in a TypeScript-safe way
-              const originalWrite = res.write.bind(res);
-              const originalEnd = res.end.bind(res);
+              // Override write and end methods
+              const originalWrite = res.write;
+              const originalEnd = res.end;
               
-              // Safe override for write
-              res.write = function(chunk, encoding?, callback?) {
+              // Safely override write method
+              res.write = function(chunk) {
                 if (chunk) {
-                  responseBody += typeof chunk === 'string' ? chunk : chunk.toString();
+                  responseBody += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : chunk;
                 }
-                // Call with original arguments
-                return originalWrite(chunk, encoding, callback);
+                // Call original with all arguments
+                return originalWrite.apply(res, arguments);
               };
               
-              // Safe override for end
-              res.end = function(chunk?, encoding?, callback?) {
+              // Safely override end method
+              res.end = function(chunk) {
                 if (chunk) {
-                  responseBody += typeof chunk === 'string' ? chunk : chunk.toString();
+                  responseBody += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : chunk;
                 }
                 
                 console.log('HTML response preview:', responseBody.substring(0, 1000) + '...');
                 
-                // Call with original arguments
-                return originalEnd(chunk, encoding, callback);
+                // Call original with all arguments
+                return originalEnd.apply(res, arguments);
               };
             }
           });
