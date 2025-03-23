@@ -82,7 +82,7 @@ export const parseTransactionsWithAI = async (
     };
     
     try {
-      // Try API via proxy - this is our primary method
+      // Try using the proxy first - this is our primary method
       console.log("Attempting to call Claude API via proxy...");
       const data = await ApiService.callClaudeApiViaProxy(apiKey, options);
       
@@ -117,26 +117,43 @@ export const parseTransactionsWithAI = async (
         console.error('Invalid Claude response structure:', data);
         throw new Error('Invalid Claude response structure');
       }
-    } catch (apiError: any) {
-      console.error("API request failed:", apiError);
+    } catch (proxyError: any) {
+      console.error("Proxy request failed:", proxyError);
       
-      // Detailed error message for HTML responses
-      if (apiError.message && apiError.message.includes('HTML')) {
+      // If we get a CORS error or HTML response from the proxy, try direct API with no-cors mode
+      // Note: no-cors returns an opaque response we can't read, but we're trying as a last resort
+      try {
+        console.log("Proxy failed, attempting direct API call with no-cors...");
+        const directData = await ApiService.callClaudeApi(apiKey, options);
+        
+        if (directData && directData._opaque_response) {
+          // We need to inform the user that no-cors mode was used, which doesn't return usable data
+          throw new Error('Direct API call used no-cors mode, which returns an opaque response. API access requires a server-side proxy. Try using a different network or hosting environment.');
+        }
+        
+      } catch (directError: any) {
+        console.error("Direct API request also failed:", directError);
+        // Combine errors for better debugging
+        throw new Error(`API request failed: ${proxyError.message} (and direct API call failed: ${directError.message})`);
+      }
+      
+      // Detailed error message for HTML responses from the proxy
+      if (proxyError.message && proxyError.message.includes('HTML')) {
         throw new Error('Received HTML instead of JSON. The server is likely returning an error page or CORS issue. Check the debug modal for details.');
       }
       
       // If we got a CORS error
-      if (apiError.message && apiError.message.includes('CORS')) {
+      if (proxyError.message && proxyError.message.includes('CORS')) {
         throw new Error('CORS policy prevented API access. The browser blocked the request for security reasons. Try using the proxy server instead.');
       }
 
       // If it's a network error (e.g., Failed to fetch)
-      if (apiError.name === 'TypeError' && apiError.message.includes('fetch')) {
+      if (proxyError.name === 'TypeError' && proxyError.message.includes('fetch')) {
         throw new Error('Network error: Could not connect to the API. This may be due to CORS restrictions or network connectivity issues.');
       }
       
       // Generic error
-      throw new Error(`Error calling Claude API: ${apiError.message || 'Unknown error'}`);
+      throw new Error(`Error calling Claude API: ${proxyError.message || 'Unknown error'}`);
     }
   } catch (error: any) {
     console.error('Error parsing with AI:', error);

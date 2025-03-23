@@ -90,22 +90,22 @@ export default defineConfig(({ mode }) => ({
               const originalEnd = res.end;
               
               // Create a type-safe override for the write method
-              res.write = function(chunk: any, ...args: any[]): boolean {
+              res.write = function(chunk, encoding, callback) {
                 if (chunk) {
                   responseBody += typeof chunk === 'string' ? chunk : chunk.toString();
                 }
-                return originalWrite.apply(res, [chunk, ...args]);
+                return originalWrite.call(res, chunk, encoding, callback);
               };
               
               // Create a type-safe override for the end method
-              res.end = function(chunk: any, ...args: any[]): any {
+              res.end = function(chunk, encoding, callback) {
                 if (chunk) {
                   responseBody += typeof chunk === 'string' ? chunk : chunk.toString();
                 }
                 
                 console.log('HTML response preview:', responseBody.substring(0, 1000) + '...');
                 
-                return originalEnd.apply(res, [chunk, ...args]);
+                return originalEnd.call(res, chunk, encoding, callback);
               };
             }
           });
