@@ -50,50 +50,81 @@ function parseTransactionsFromText(textContent: string[]): Transaction[] {
   // Split text into lines for better processing
   const lines = fullText.split(/\r?\n/);
   
-  // Chase specific patterns
-  const chasePattern1 = /(\d{2}\/\d{2})\s+(\d{2}\/\d{2})\s+([\w\s\.\-\&\,\']+)\s+([\-\+]?\$?\s?\d+,?\d*\.\d{2})/;
-  const chasePattern2 = /(\d{2}\/\d{2})\s+([\w\s\.\-\&\,\']+)\s+([\-\+]?\$?\s?\d+,?\d*\.\d{2})/;
+  // Primary patterns for Chase statements
+  const chaseTransactionPattern1 = /(\d{2}\/\d{2})\s+(\d{2}\/\d{2})?\s+([\w\s\.\-\&\,\'\/]+)\s+([\-\+]?\$?\s?\d+,?\d*\.\d{2})/;
+  const chaseTransactionPattern2 = /(\d{2}\/\d{2})\s+([\w\s\.\-\&\,\'\/]+)\s+([\-\+]?\$?\s?\d+,?\d*\.\d{2})/;
+  const chaseTransactionPattern3 = /(\d{2}\/\d{2})\s+(.*?)(?:\s{2,}|\t)([\-\+]?\$?\s?\d+,?\d*\.\d{2})$/;
   
-  // General patterns for dates and amounts
+  // Additional patterns for different date formats and transaction layouts
   const datePattern = /\b(\d{1,2}[\/\-\.]\d{1,2}(?:[\/\-\.]\d{2,4})?)\b/;
   const amountPattern = /([\-\+]?\$?\s?\d+,?\d*\.\d{2})/;
   
+  // Pattern for typical transaction sections in Chase statements
+  const sectionPattern = /TRANSACTION\s+DETAIL|PAYMENTS\s+AND\s+OTHER\s+CREDITS|PURCHASE\s+DETAIL|TRANSACTION\s+ACTIVITY/i;
+  
   let lastFoundDate = '';
   let foundTransactions = 0;
+  let inTransactionSection = false;
 
   for (let i = 0; i < lines.length; i++) {
     let line = lines[i].trim();
     if (!line) continue;
     
+    // Check if we're entering a transaction section
+    if (sectionPattern.test(line)) {
+      inTransactionSection = true;
+      console.log(`Entered transaction section at line ${i}: ${line}`);
+      continue;
+    }
+    
+    // Skip lines that are likely headers or footers
+    if (line.includes('Page') && line.includes('of') && /Page\s+\d+\s+of\s+\d+/.test(line)) continue;
+    if (line.includes('Statement Date') && line.includes('Account Number')) continue;
+    
     console.log(`Processing line ${i}: ${line.substring(0, 50)}${line.length > 50 ? '...' : ''}`);
     
     // Try Chase specific patterns first
-    let match = line.match(chasePattern1) || line.match(chasePattern2);
+    let match = line.match(chaseTransactionPattern1) || line.match(chaseTransactionPattern2) || line.match(chaseTransactionPattern3);
     
     if (match) {
+      // Extract date (first date in the match)
       const dateIndex = match.findIndex((val, idx) => idx > 0 && /^\d{2}\/\d{2}$/.test(val));
       const date = dateIndex > 0 ? match[dateIndex] : '';
       
-      // Get the last two elements which should be description and amount
-      const amount = match[match.length - 1];
-      const description = match[match.length - 2];
+      // For pattern 1, description is index 3 and amount is index 4
+      // For pattern 2, description is index 2 and amount is index 3
+      // For pattern 3, description is index 2 and amount is index 3
+      let description = '';
+      let amount = '';
+      
+      if (match === line.match(chaseTransactionPattern1)) {
+        description = match[3];
+        amount = match[4];
+      } else {
+        description = match[2];
+        amount = match[3];
+      }
       
       if (date && description && amount) {
         lastFoundDate = date;
         const category = determineCategory(description);
         
+        // Clean up the amount to remove any non-numeric characters except for decimal point and minus sign
+        const cleanAmount = amount.replace(/[^0-9\.\-]/g, '');
+        
         transactions.push({
           date,
           description: description.trim(),
-          amount,
+          amount: cleanAmount.startsWith('-') ? cleanAmount : (description.toLowerCase().includes('payment') ? '-' + cleanAmount : cleanAmount),
           category
         });
         
         foundTransactions++;
-        console.log(`Found transaction: ${date} | ${description.trim()} | ${amount} | ${category}`);
+        console.log(`Found transaction with Chase pattern: ${date} | ${description.trim()} | ${amount} | ${category}`);
       }
     } else {
-      // Try general pattern matching
+      // Try additional pattern matching for transactions
+      // Look for date and amount combinations
       const dateMatch = line.match(datePattern);
       const amountMatch = line.match(amountPattern);
       
@@ -115,10 +146,13 @@ function parseTransactionsFromText(textContent: string[]): Transaction[] {
         lastFoundDate = date;
         const category = determineCategory(description);
         
+        // Clean up the amount
+        const cleanAmount = amount.replace(/[^0-9\.\-]/g, '');
+        
         transactions.push({
           date,
           description,
-          amount,
+          amount: cleanAmount.startsWith('-') ? cleanAmount : (description.toLowerCase().includes('payment') ? '-' + cleanAmount : cleanAmount),
           category
         });
         
@@ -134,10 +168,13 @@ function parseTransactionsFromText(textContent: string[]): Transaction[] {
         if (description) {
           const category = determineCategory(description);
           
+          // Clean up the amount
+          const cleanAmount = amount.replace(/[^0-9\.\-]/g, '');
+          
           transactions.push({
             date: lastFoundDate,
             description,
-            amount,
+            amount: cleanAmount.startsWith('-') ? cleanAmount : (description.toLowerCase().includes('payment') ? '-' + cleanAmount : cleanAmount),
             category
           });
           
@@ -145,32 +182,35 @@ function parseTransactionsFromText(textContent: string[]): Transaction[] {
           console.log(`Found transaction with description+amount: ${lastFoundDate} | ${description} | ${amount} | ${category}`);
         }
       }
-      // Last attempt: try to match standalone transaction lines
-      else if (line.length > 15 && !line.includes('BALANCE') && !line.includes('Total') && !line.includes('Page')) {
-        const words = line.split(/\s+/);
+      // Last attempt: Use a multi-line approach for transactions that might span multiple lines
+      else if (i + 1 < lines.length) {
+        const currentLine = line;
+        const nextLine = lines[i + 1].trim();
         
-        // If line has multiple words and last one looks like an amount
-        if (words.length >= 3 && /^[\-\+]?\$?\s?\d+,?\d*\.\d{2}$/.test(words[words.length - 1])) {
-          const amount = words[words.length - 1];
-          // See if first word is a date
-          const possibleDate = words[0];
+        const currentDateMatch = currentLine.match(datePattern);
+        const nextLineAmountMatch = nextLine.match(amountPattern);
+        
+        if (currentDateMatch && nextLineAmountMatch && !nextLine.match(datePattern)) {
+          const date = currentDateMatch[1];
+          const amount = nextLineAmountMatch[1];
+          const description = currentLine.substring(currentLine.indexOf(currentDateMatch[0]) + currentDateMatch[0].length).trim();
           
-          if (/^\d{1,2}\/\d{1,2}$/.test(possibleDate)) {
-            const date = possibleDate;
-            const description = words.slice(1, words.length - 1).join(' ');
-            const category = determineCategory(description);
-            
-            transactions.push({
-              date,
-              description,
-              amount,
-              category
-            });
-            
-            lastFoundDate = date;
-            foundTransactions++;
-            console.log(`Found standalone transaction: ${date} | ${description} | ${amount} | ${category}`);
-          }
+          lastFoundDate = date;
+          const category = determineCategory(description);
+          
+          // Clean up the amount
+          const cleanAmount = amount.replace(/[^0-9\.\-]/g, '');
+          
+          transactions.push({
+            date,
+            description,
+            amount: cleanAmount.startsWith('-') ? cleanAmount : (description.toLowerCase().includes('payment') ? '-' + cleanAmount : cleanAmount),
+            category
+          });
+          
+          foundTransactions++;
+          console.log(`Found multi-line transaction: ${date} | ${description} | ${amount} | ${category}`);
+          i++; // Skip the next line
         }
       }
     }
@@ -182,19 +222,39 @@ function parseTransactionsFromText(textContent: string[]): Transaction[] {
   if (transactions.length < 3) {
     console.warn("Few transactions found. Trying more aggressive extraction...");
     
-    // Look for consecutive lines with dates and amounts
+    // Second pass: look for any lines with dates and amounts, or multi-line patterns
     for (let i = 0; i < lines.length - 1; i++) {
       const line = lines[i].trim();
-      const nextLine = lines[i + 1].trim();
+      if (!line) continue;
       
       const dateMatch = line.match(/\b\d{1,2}\/\d{1,2}\b/);
       if (dateMatch) {
-        const amountMatch = nextLine.match(/([\-\+]?\$?\s?\d+,?\d*\.\d{2})/);
+        // Check current line for amount
+        const amountMatch = line.match(/([\-\+]?\$?\s?\d+,?\d*\.\d{2})/);
         if (amountMatch) {
+          const description = line
+            .replace(dateMatch[0], '')
+            .replace(amountMatch[0], '')
+            .trim();
+          
           transactions.push({
             date: dateMatch[0],
-            description: line.replace(dateMatch[0], '').trim() || nextLine.replace(amountMatch[0], '').trim(),
-            amount: amountMatch[1],
+            description: description || 'Unknown transaction',
+            amount: amountMatch[1].replace(/[^0-9\.\-]/g, ''),
+            category: determineCategory(description) || 'Other'
+          });
+          continue;
+        }
+        
+        // Check next line for amount
+        const nextLine = lines[i + 1].trim();
+        const nextLineAmountMatch = nextLine.match(/([\-\+]?\$?\s?\d+,?\d*\.\d{2})/);
+        
+        if (nextLineAmountMatch && !nextLine.match(/\b\d{1,2}\/\d{1,2}\b/)) {
+          transactions.push({
+            date: dateMatch[0],
+            description: line.replace(dateMatch[0], '').trim() || nextLine.replace(nextLineAmountMatch[0], '').trim() || 'Unknown transaction',
+            amount: nextLineAmountMatch[1].replace(/[^0-9\.\-]/g, ''),
             category: 'Other'
           });
           i++; // Skip the next line
@@ -203,6 +263,34 @@ function parseTransactionsFromText(textContent: string[]): Transaction[] {
     }
     
     console.log(`After aggressive extraction, total transactions: ${transactions.length}`);
+  }
+  
+  // Search specifically for payment entries which often have specific formats
+  const paymentLines = lines.filter(line => 
+    line.toLowerCase().includes('payment') || 
+    line.toLowerCase().includes('deposit') || 
+    line.toLowerCase().includes('credit')
+  );
+  
+  for (const line of paymentLines) {
+    const dateMatch = line.match(datePattern);
+    const amountMatch = line.match(amountPattern);
+    
+    if (dateMatch && amountMatch) {
+      const existingTransaction = transactions.find(t => 
+        t.date === dateMatch[1] && 
+        t.amount === amountMatch[1].replace(/[^0-9\.\-]/g, '')
+      );
+      
+      if (!existingTransaction) {
+        transactions.push({
+          date: dateMatch[1],
+          description: line.replace(dateMatch[0], '').replace(amountMatch[0], '').trim() || 'Payment',
+          amount: '-' + amountMatch[1].replace(/[^0-9\.]/g, ''), // Payments are typically negative
+          category: 'Payment'
+        });
+      }
+    }
   }
   
   // If still no transactions found, return sample of text content
@@ -225,37 +313,113 @@ function parseTransactionsFromText(textContent: string[]): Transaction[] {
   return transactions;
 }
 
-// Simple function to determine transaction category based on keywords
+// Enhanced function to determine transaction category based on keywords
 function determineCategory(description: string): string {
   const lowerDesc = description.toLowerCase();
   
-  if (lowerDesc.includes('grocery') || lowerDesc.includes('food') || lowerDesc.includes('market') || 
-      lowerDesc.includes('walmart') || lowerDesc.includes('target') || lowerDesc.includes('safeway')) {
-    return 'Groceries';
-  } else if (lowerDesc.includes('restaurant') || lowerDesc.includes('cafe') || lowerDesc.includes('coffee') || 
-             lowerDesc.includes('pizza') || lowerDesc.includes('mcdonalds') || lowerDesc.includes('starbucks')) {
+  // Dining/Restaurants
+  if (lowerDesc.includes('restaurant') || lowerDesc.includes('cafe') || lowerDesc.includes('coffee') || 
+      lowerDesc.includes('pizza') || lowerDesc.includes('mcdonalds') || lowerDesc.includes('starbucks') ||
+      lowerDesc.includes('dining') || lowerDesc.includes('doordash') || lowerDesc.includes('grubhub') ||
+      lowerDesc.includes('uber eat') || lowerDesc.includes('taco') || lowerDesc.includes('burger') ||
+      lowerDesc.includes('ihop') || lowerDesc.includes('subway') || lowerDesc.includes('steakhouse') ||
+      lowerDesc.includes('diner') || lowerDesc.includes('chipotle') || lowerDesc.includes('bbq') ||
+      lowerDesc.includes('sushi') || lowerDesc.includes('food') || lowerDesc.includes('bakery')) {
     return 'Dining';
-  } else if (lowerDesc.includes('gas') || lowerDesc.includes('fuel') || lowerDesc.includes('uber') || 
-             lowerDesc.includes('lyft') || lowerDesc.includes('transit') || lowerDesc.includes('parking')) {
-    return 'Transportation';
-  } else if (lowerDesc.includes('salary') || lowerDesc.includes('deposit') || lowerDesc.includes('payment') || 
-             lowerDesc.includes('direct dep') || lowerDesc.includes('payroll')) {
-    return 'Income';
-  } else if (lowerDesc.includes('bill') || lowerDesc.includes('utility') || lowerDesc.includes('phone') || 
-             lowerDesc.includes('cable') || lowerDesc.includes('electric') || lowerDesc.includes('water')) {
-    return 'Bills';
-  } else if (lowerDesc.includes('amazon') || lowerDesc.includes('online') || lowerDesc.includes('shop') || 
-             lowerDesc.includes('store') || lowerDesc.includes('best buy') || lowerDesc.includes('purchase')) {
-    return 'Shopping';
-  } else if (lowerDesc.includes('withdraw') || lowerDesc.includes('atm') || lowerDesc.includes('cash')) {
-    return 'Cash';
-  } else if (lowerDesc.includes('transfer') || lowerDesc.includes('zelle') || lowerDesc.includes('venmo')) {
-    return 'Transfer';
-  } else if (lowerDesc.includes('fee') || lowerDesc.includes('interest') || lowerDesc.includes('service charge')) {
-    return 'Fees';
-  } else {
-    return 'Other';
   }
+  
+  // Groceries
+  if (lowerDesc.includes('grocery') || lowerDesc.includes('market') || lowerDesc.includes('supermarket') || 
+      lowerDesc.includes('walmart') || lowerDesc.includes('target') || lowerDesc.includes('safeway') ||
+      lowerDesc.includes('kroger') || lowerDesc.includes('trader') || lowerDesc.includes('whole foods') ||
+      lowerDesc.includes('aldi') || lowerDesc.includes('heb') || lowerDesc.includes('publix') ||
+      lowerDesc.includes('costco') || lowerDesc.includes('sam\'s club') || lowerDesc.includes('food lion')) {
+    return 'Groceries';
+  }
+  
+  // Transportation
+  if (lowerDesc.includes('gas') || lowerDesc.includes('fuel') || lowerDesc.includes('uber') || 
+      lowerDesc.includes('lyft') || lowerDesc.includes('transit') || lowerDesc.includes('parking') ||
+      lowerDesc.includes('taxi') || lowerDesc.includes('toll') || lowerDesc.includes('metro') ||
+      lowerDesc.includes('train') || lowerDesc.includes('airline') || lowerDesc.includes('air') ||
+      lowerDesc.includes('flight') || lowerDesc.includes('delta') || lowerDesc.includes('united') ||
+      lowerDesc.includes('american air') || lowerDesc.includes('southwest') || lowerDesc.includes('exxon') ||
+      lowerDesc.includes('shell') || lowerDesc.includes('chevron') || lowerDesc.includes('76') ||
+      lowerDesc.includes('marathon') || lowerDesc.includes('speedway') || lowerDesc.includes('bp')) {
+    return 'Transportation';
+  }
+  
+  // Income
+  if (lowerDesc.includes('salary') || lowerDesc.includes('direct dep') || lowerDesc.includes('payroll') ||
+      lowerDesc.includes('deposit from') || lowerDesc.includes('ach deposit') || lowerDesc.includes('income') ||
+      lowerDesc.includes('tax refund') || lowerDesc.includes('interest paid') || lowerDesc.includes('dividend')) {
+    return 'Income';
+  }
+  
+  // Bills & Utilities
+  if (lowerDesc.includes('bill') || lowerDesc.includes('utility') || lowerDesc.includes('phone') || 
+      lowerDesc.includes('cable') || lowerDesc.includes('electric') || lowerDesc.includes('water') ||
+      lowerDesc.includes('gas bill') || lowerDesc.includes('internet') || lowerDesc.includes('wireless') ||
+      lowerDesc.includes('netflix') || lowerDesc.includes('spotify') || lowerDesc.includes('hulu') ||
+      lowerDesc.includes('insurance') || lowerDesc.includes('at&t') || lowerDesc.includes('verizon') ||
+      lowerDesc.includes('t-mobile') || lowerDesc.includes('comcast') || lowerDesc.includes('xfinity')) {
+    return 'Bills';
+  }
+  
+  // Shopping
+  if (lowerDesc.includes('amazon') || lowerDesc.includes('online') || lowerDesc.includes('shop') || 
+      lowerDesc.includes('store') || lowerDesc.includes('best buy') || lowerDesc.includes('purchase') ||
+      lowerDesc.includes('ebay') || lowerDesc.includes('etsy') || lowerDesc.includes('wayfair') ||
+      lowerDesc.includes('home depot') || lowerDesc.includes('lowe\'s') || lowerDesc.includes('ikea') ||
+      lowerDesc.includes('apple') || lowerDesc.includes('clothing') || lowerDesc.includes('shoes') ||
+      lowerDesc.includes('fashion') || lowerDesc.includes('mall') || lowerDesc.includes('retail')) {
+    return 'Shopping';
+  }
+  
+  // Cash & ATM
+  if (lowerDesc.includes('withdraw') || lowerDesc.includes('atm') || lowerDesc.includes('cash') ||
+      lowerDesc.includes('withdrawal')) {
+    return 'Cash';
+  }
+  
+  // Transfers
+  if (lowerDesc.includes('transfer') || lowerDesc.includes('zelle') || lowerDesc.includes('venmo') ||
+      lowerDesc.includes('paypal') || lowerDesc.includes('send money') || lowerDesc.includes('wire') ||
+      lowerDesc.includes('chase quickpay') || lowerDesc.includes('cashapp') || lowerDesc.includes('square cash')) {
+    return 'Transfer';
+  }
+  
+  // Fees & Interest
+  if (lowerDesc.includes('fee') || lowerDesc.includes('interest') || lowerDesc.includes('service charge') ||
+      lowerDesc.includes('membership fee') || lowerDesc.includes('annual fee') || lowerDesc.includes('late fee') ||
+      lowerDesc.includes('finance charge') || lowerDesc.includes('balance transfer fee')) {
+    return 'Fees';
+  }
+  
+  // Health
+  if (lowerDesc.includes('doctor') || lowerDesc.includes('hospital') || lowerDesc.includes('clinic') ||
+      lowerDesc.includes('pharmacy') || lowerDesc.includes('medical') || lowerDesc.includes('dental') ||
+      lowerDesc.includes('healthcare') || lowerDesc.includes('vision') || lowerDesc.includes('cvs') ||
+      lowerDesc.includes('walgreens') || lowerDesc.includes('rite aid')) {
+    return 'Health';
+  }
+  
+  // Entertainment
+  if (lowerDesc.includes('movie') || lowerDesc.includes('theater') || lowerDesc.includes('cinema') ||
+      lowerDesc.includes('ticket') || lowerDesc.includes('event') || lowerDesc.includes('concert') ||
+      lowerDesc.includes('disney') || lowerDesc.includes('netflix') || lowerDesc.includes('hulu') ||
+      lowerDesc.includes('spotify') || lowerDesc.includes('amazon prime') || lowerDesc.includes('hbo')) {
+    return 'Entertainment';
+  }
+  
+  // Payments
+  if (lowerDesc.includes('payment thank') || lowerDesc.includes('autopay') || lowerDesc.includes('bill pay') ||
+      lowerDesc.includes('payment - thank') || lowerDesc.includes('automatic payment')) {
+    return 'Payment';
+  }
+  
+  // Return 'Other' for any unmatched descriptions
+  return 'Other';
 }
 
 export const convertPdfToExcel = async (file: File): Promise<Transaction[]> => {
