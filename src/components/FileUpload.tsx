@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
@@ -81,7 +80,7 @@ const FileUpload: React.FC = () => {
     
     try {
       if (useAI) {
-        // Check if premium and API key are available
+        // Check if premium access is available
         if (!isPremium) {
           toast({
             title: "Premium Feature",
@@ -92,17 +91,11 @@ const FileUpload: React.FC = () => {
           return;
         }
         
-        if (!apiKey) {
-          setApiKeyDialogOpen(true);
-          setIsConverting(false);
-          return;
-        }
-        
         // Extract text from PDF for AI processing
         const extractedText = await extractTextFromPdf(file);
         
-        // Use AI parsing
-        const aiExtractedTransactions = await parseTransactionsWithAI(extractedText, apiKey);
+        // Use AI parsing (with default API key if none provided)
+        const aiExtractedTransactions = await parseTransactionsWithAI(extractedText, apiKey || undefined);
         setTransactions(aiExtractedTransactions);
         
         toast({
@@ -156,19 +149,18 @@ const FileUpload: React.FC = () => {
   }, [transactions, toast]);
 
   const saveApiKey = useCallback(() => {
+    // If user provided API key is empty, we'll use the default one
     if (!apiKey) {
       toast({
-        title: "API Key Required",
-        description: "Please enter your Claude API key",
-        variant: "destructive",
+        title: "Using Default API Key",
+        description: "Using our default Claude API key for this session",
       });
-      return;
+    } else {
+      toast({
+        title: "API Key Saved",
+        description: "Your Claude API key has been saved for this session",
+      });
     }
-    
-    toast({
-      title: "API Key Saved",
-      description: "Your Claude API key has been saved for this session",
-    });
     
     setApiKeyDialogOpen(false);
     

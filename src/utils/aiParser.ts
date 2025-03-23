@@ -1,6 +1,9 @@
 
 import { Transaction } from "./fileConverter";
 
+// Default API key for Claude (for demo purposes)
+const DEFAULT_CLAUDE_API_KEY = "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";
+
 // Check if a user has premium access
 export const hasPremiumAccess = (): boolean => {
   // In a production app, this would check server-side subscription status
@@ -19,7 +22,7 @@ export const togglePremiumAccess = (): boolean => {
 // Parse transactions using Claude AI
 export const parseTransactionsWithAI = async (
   pdfText: string[],
-  apiKey: string
+  apiKey: string = DEFAULT_CLAUDE_API_KEY
 ): Promise<Transaction[]> => {
   try {
     // The full text from the PDF
