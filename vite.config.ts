@@ -88,14 +88,15 @@ export default defineConfig(({ mode }) => ({
               const originalWrite = res.write;
               const originalEnd = res.end;
               
-              res.write = function(chunk, ...args) {
+              // Fix TypeScript errors by providing correct typing for the functions
+              res.write = function(chunk: any, ...args: any[]) {
                 if (chunk) {
                   responseBody += chunk.toString();
                 }
                 return originalWrite.apply(res, [chunk, ...args]);
               };
               
-              res.end = function(chunk, ...args) {
+              res.end = function(chunk: any, ...args: any[]) {
                 if (chunk) {
                   responseBody += chunk.toString();
                 }

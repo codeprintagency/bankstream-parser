@@ -43,11 +43,6 @@ app.use('/api/claude', createProxyMiddleware({
       console.log('Setting anthropic-version header');
     }
     
-    if (req.headers['anthropic-dangerous-direct-browser-access']) {
-      proxyReq.setHeader('anthropic-dangerous-direct-browser-access', req.headers['anthropic-dangerous-direct-browser-access']);
-      console.log('Setting anthropic-dangerous-direct-browser-access header');
-    }
-    
     if (req.headers['content-type']) {
       proxyReq.setHeader('content-type', req.headers['content-type']);
       console.log('Setting content-type header');
@@ -81,7 +76,7 @@ app.use('/api/claude', createProxyMiddleware({
     // Add CORS headers
     proxyRes.headers['Access-Control-Allow-Origin'] = '*';
     proxyRes.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS';
-    proxyRes.headers['Access-Control-Allow-Headers'] = 'Content-Type, x-api-key, anthropic-version, anthropic-dangerous-direct-browser-access';
+    proxyRes.headers['Access-Control-Allow-Headers'] = 'Content-Type, x-api-key, anthropic-version';
     
     // Log content type for debugging
     console.log('Response content-type:', proxyRes.headers['content-type']);
@@ -112,7 +107,7 @@ app.use('/api/claude', createProxyMiddleware({
 app.options('/api/claude*', (req, res) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, x-api-key, anthropic-version, anthropic-dangerous-direct-browser-access');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, x-api-key, anthropic-version');
   res.status(200).send();
 });
 

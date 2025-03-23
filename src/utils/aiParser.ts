@@ -69,117 +69,188 @@ export const parseTransactionsWithAI = async (
       ${fullText.substring(0, 12000)}
     `;
 
-    console.log("Sending request to Claude through proxy with prompt length:", prompt.length);
+    console.log("Sending request to Claude with API key:", apiKey.substring(0, 8) + "...");
     
-    // Make the request to Claude AI API through our proxy
-    const apiUrl = '/api/claude/v1/messages';
-    console.log(`Making request to: ${apiUrl}`);
-    
-    // Add a timestamp to prevent caching
-    const timestamp = new Date().getTime();
-    const urlWithTimestamp = `${apiUrl}?_t=${timestamp}`;
-    
-    // Try sending a direct request to the Claude API
-    console.log("Using API key:", apiKey ? apiKey.substring(0, 10) + "..." : "No API key provided");
-    
-    // Use fetch with proper headers
-    const requestOptions = {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0'
-      },
-      body: JSON.stringify({
-        model: 'claude-3-haiku-20240307',
-        max_tokens: 4000,
-        messages: [
-          {
-            role: 'user',
-            content: prompt
-          }
-        ]
-      })
-    };
-    
-    console.log("Request headers:", JSON.stringify(requestOptions.headers));
-    
-    // Make the request
-    const response = await fetch(urlWithTimestamp, requestOptions);
-    
-    // Log the response status and details
-    console.log('Claude API response status:', response.status);
-    console.log('Claude API response headers:', Object.fromEntries(response.headers.entries()));
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Claude API error status:', response.status);
-      console.error('Claude API error response:', errorText);
-      
-      // Store HTML response
-      lastHtmlResponse = errorText;
-      
-      throw new Error(`Claude API error: ${response.status} - ${errorText}`);
-    }
-    
-    // Get the raw response text first to inspect it
-    const responseText = await response.text();
-    console.log("Raw API response (first 500 chars):", responseText.substring(0, 500) + "...");
-    
-    // Store the response for debugging
-    lastHtmlResponse = responseText;
-    
-    // Check if the response appears to be HTML
-    if (responseText.trim().startsWith('<!DOCTYPE') || responseText.trim().startsWith('<html')) {
-      console.error('Received HTML response instead of JSON');
-      throw new Error('Received HTML instead of JSON. The proxy configuration may be incorrect.');
-    }
-    
-    // Try to parse the response as JSON
+    // Use Anthropic's Messages API directly
     try {
-      const data = JSON.parse(responseText);
-      console.log("Claude response parsed as JSON:", data);
+      // Make direct API request instead of going through proxy, which might be causing issues
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "claude-3-haiku-20240307",
+          max_tokens: 4000,
+          messages: [
+            {
+              role: "user",
+              content: prompt
+            }
+          ]
+        })
+      });
       
-      // Extract the content from Claude's response
+      console.log("Claude API response status:", response.status);
+      console.log("Claude API response headers:", Object.fromEntries(response.headers.entries()));
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Claude API error:", errorText);
+        lastHtmlResponse = errorText;
+        throw new Error(`Claude API error: ${response.status} - ${errorText}`);
+      }
+      
+      const data = await response.json();
+      console.log("Claude response:", data);
+      
       if (data && data.content && data.content[0] && data.content[0].text) {
         const content = data.content[0].text;
         console.log("Claude content:", content.substring(0, 200) + "...");
         
-        // Find the JSON array in the response
-        const jsonMatch = content.match(/\[\s*\{.*\}\s*\]/s);
-        
-        if (jsonMatch) {
-          // Parse the JSON data
-          const transactions: Transaction[] = JSON.parse(jsonMatch[0]);
+        // Try to parse the content as JSON directly
+        try {
+          const transactions: Transaction[] = JSON.parse(content);
           console.log(`Parsed ${transactions.length} transactions from Claude response`);
           return transactions;
-        } else {
-          // Try to parse the entire content as JSON if it doesn't match the pattern
-          try {
-            const transactions: Transaction[] = JSON.parse(content);
-            console.log(`Parsed ${transactions.length} transactions from full Claude response`);
+        } catch (jsonError) {
+          // If direct parsing fails, try to extract JSON array using regex
+          const jsonMatch = content.match(/\[\s*\{.*\}\s*\]/s);
+          
+          if (jsonMatch) {
+            const transactions: Transaction[] = JSON.parse(jsonMatch[0]);
+            console.log(`Parsed ${transactions.length} transactions using regex extraction`);
             return transactions;
-          } catch (jsonError) {
-            console.error('Could not parse JSON in Claude response', jsonError);
-            console.error('Claude response content:', content);
-            throw new Error('Failed to parse JSON from Claude response');
           }
+          
+          // If all parsing attempts fail
+          console.error('Could not parse JSON in Claude response', jsonError);
+          console.error('Claude response content:', content);
+          lastHtmlResponse = content;
+          
+          throw new Error('Failed to parse JSON from Claude response');
         }
       } else {
         console.error('Invalid Claude response structure:', data);
+        if (typeof data === 'string') {
+          lastHtmlResponse = data;
+        } else {
+          lastHtmlResponse = JSON.stringify(data, null, 2);
+        }
         throw new Error('Invalid Claude response structure');
       }
-    } catch (jsonError) {
-      console.error('Error parsing Claude API response as JSON:', jsonError);
-      console.error('Response was:', responseText.substring(0, 1000) + '...');
+    } catch (apiError) {
+      console.error("Error with direct API call:", apiError);
       
-      // Fallback to the sample transactions from fileConverter.ts
-      console.log("Using fallback sample transactions due to parsing error");
-      return getFallbackTransactions();
+      // Fall back to the proxy approach
+      console.log("Falling back to proxy approach");
+      
+      // Make the request to Claude AI API through our proxy
+      const apiUrl = '/api/claude/v1/messages';
+      console.log(`Making request to proxy: ${apiUrl}`);
+      
+      // Add a timestamp to prevent caching
+      const timestamp = new Date().getTime();
+      const urlWithTimestamp = `${apiUrl}?_t=${timestamp}`;
+      
+      // Use fetch with proper headers
+      const requestOptions = {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        },
+        body: JSON.stringify({
+          model: 'claude-3-haiku-20240307',
+          max_tokens: 4000,
+          messages: [
+            {
+              role: 'user',
+              content: prompt
+            }
+          ]
+        })
+      };
+      
+      console.log("Proxy request headers:", JSON.stringify(requestOptions.headers));
+      
+      // Make the request
+      const response = await fetch(urlWithTimestamp, requestOptions);
+      
+      // Log the response status and details
+      console.log('Proxy response status:', response.status);
+      console.log('Proxy response headers:', Object.fromEntries(response.headers.entries()));
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Proxy error status:', response.status);
+        console.error('Proxy error response:', errorText);
+        
+        // Store HTML response
+        lastHtmlResponse = errorText;
+        
+        throw new Error(`Proxy error: ${response.status} - ${errorText}`);
+      }
+      
+      // Get the raw response text first to inspect it
+      const responseText = await response.text();
+      console.log("Raw proxy response (first 500 chars):", responseText.substring(0, 500) + "...");
+      
+      // Store the response for debugging
+      lastHtmlResponse = responseText;
+      
+      // Check if the response appears to be HTML
+      if (responseText.trim().startsWith('<!DOCTYPE') || responseText.trim().startsWith('<html')) {
+        console.error('Received HTML response instead of JSON');
+        throw new Error('Received HTML instead of JSON. The proxy configuration may be incorrect.');
+      }
+      
+      // Try to parse the response as JSON
+      try {
+        const data = JSON.parse(responseText);
+        console.log("Proxy response parsed as JSON:", data);
+        
+        // Extract the content from Claude's response
+        if (data && data.content && data.content[0] && data.content[0].text) {
+          const content = data.content[0].text;
+          console.log("Claude content from proxy:", content.substring(0, 200) + "...");
+          
+          // Find the JSON array in the response
+          const jsonMatch = content.match(/\[\s*\{.*\}\s*\]/s);
+          
+          if (jsonMatch) {
+            // Parse the JSON data
+            const transactions: Transaction[] = JSON.parse(jsonMatch[0]);
+            console.log(`Parsed ${transactions.length} transactions from proxy response`);
+            return transactions;
+          } else {
+            // Try to parse the entire content as JSON if it doesn't match the pattern
+            try {
+              const transactions: Transaction[] = JSON.parse(content);
+              console.log(`Parsed ${transactions.length} transactions from full proxy response`);
+              return transactions;
+            } catch (jsonError) {
+              console.error('Could not parse JSON in proxy response', jsonError);
+              console.error('Proxy response content:', content);
+              throw new Error('Failed to parse JSON from proxy response');
+            }
+          }
+        } else {
+          console.error('Invalid proxy response structure:', data);
+          throw new Error('Invalid proxy response structure');
+        }
+      } catch (jsonError) {
+        console.error('Error parsing proxy response as JSON:', jsonError);
+        console.error('Response was:', responseText.substring(0, 1000) + '...');
+        
+        throw jsonError;
+      }
     }
   } catch (error) {
     console.error('Error parsing with AI:', error);
