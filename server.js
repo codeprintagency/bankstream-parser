@@ -37,7 +37,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Proxy middleware for Claude API with improved error handling
+// Improved proxy middleware for Claude API with better error handling
 app.use('/api/claude', createProxyMiddleware({
   target: 'https://api.anthropic.com',
   changeOrigin: true,
@@ -45,7 +45,9 @@ app.use('/api/claude', createProxyMiddleware({
     '^/api/claude': ''
   },
   onProxyReq: (proxyReq, req, res) => {
-    // Log the original request
+    console.log('=== PROXY REQUEST START ===');
+    console.log('Original request URL:', req.url);
+    console.log('Method:', req.method);
     console.log('Original request headers:', req.headers);
     
     // Clean up existing headers that might be causing issues
@@ -57,12 +59,15 @@ app.use('/api/claude', createProxyMiddleware({
     if (req.headers['x-api-key']) {
       proxyReq.setHeader('x-api-key', req.headers['x-api-key']);
       console.log('Setting x-api-key header');
+    } else {
+      console.warn('Warning: No x-api-key header found in request');
     }
     
+    // Set required Anthropic headers
     proxyReq.setHeader('anthropic-version', req.headers['anthropic-version'] || '2023-06-01');
     console.log('Setting anthropic-version header');
     
-    // Add the new direct browser access header
+    // Add the direct browser access header that allows CORS
     proxyReq.setHeader('anthropic-dangerous-direct-browser-access', 'true');
     console.log('Setting anthropic-dangerous-direct-browser-access header');
     
@@ -71,12 +76,12 @@ app.use('/api/claude', createProxyMiddleware({
     console.log('Setting content-type header');
     
     // Log the modified headers
-    console.log('Production proxy request headers:', proxyReq.getHeaders());
+    console.log('Forwarded proxy request headers:', proxyReq.getHeaders());
     
     // Log the request body if it exists
     if (req.body && Object.keys(req.body).length > 0) {
       const bodyData = JSON.stringify(req.body);
-      console.log('Request body:', bodyData);
+      console.log('Request body (first 200 chars):', bodyData.substring(0, 200) + '...');
       
       // Update content-length to match the body length
       proxyReq.setHeader('content-length', Buffer.byteLength(bodyData));
@@ -85,9 +90,11 @@ app.use('/api/claude', createProxyMiddleware({
       proxyReq.write(bodyData);
       proxyReq.end();
     }
+    
+    console.log('=== PROXY REQUEST END ===');
   },
   onProxyRes: (proxyRes, req, res) => {
-    // Log response details for debugging
+    console.log('=== PROXY RESPONSE START ===');
     console.log('Claude API response status:', proxyRes.statusCode);
     console.log('Claude API response headers:', proxyRes.headers);
     
@@ -101,28 +108,60 @@ app.use('/api/claude', createProxyMiddleware({
       res.setHeader('Content-Type', proxyRes.headers['content-type']);
     }
     
-    // If the status is not 200, log the response body
-    if (proxyRes.statusCode !== 200) {
-      let responseBody = '';
-      proxyRes.on('data', (chunk) => {
-        responseBody += chunk.toString();
-      });
+    // Collect the response body for logging, especially on errors
+    let responseBody = '';
+    
+    proxyRes.on('data', (chunk) => {
+      responseBody += chunk.toString();
+    });
+    
+    proxyRes.on('end', () => {
+      // Check if the response doesn't look like JSON
+      const contentType = proxyRes.headers['content-type'] || '';
+      const isHtml = contentType.includes('text/html') || 
+              responseBody.trim().startsWith('<!DOCTYPE') || 
+              responseBody.trim().startsWith('<html') ||
+              responseBody.includes('<head>') || 
+              responseBody.includes('<body>');
       
-      proxyRes.on('end', () => {
-        console.log(`Error response from Claude API (${proxyRes.statusCode}):`, responseBody);
-      });
-    }
+      // Log response body on errors or when it's HTML
+      if (proxyRes.statusCode !== 200 || isHtml) {
+        console.log(`Response body from Claude API (${proxyRes.statusCode}):`, responseBody.substring(0, 500) + '...');
+        
+        // For HTML responses, we need to replace it with a clearer JSON error
+        if (isHtml) {
+          // Don't send HTML to the client, send a clear JSON error instead
+          // Clear any previous headers
+          res.statusCode = 502;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({
+            error: 'CORS error',
+            message: 'Received HTML instead of JSON from the API server. This likely indicates a CORS or authentication issue.',
+            statusCode: proxyRes.statusCode
+          }));
+          console.log('Replaced HTML response with JSON error');
+          return;
+        }
+      } else {
+        console.log('Response body preview (first 100 chars):', responseBody.substring(0, 100) + '...');
+      }
+      
+      console.log('=== PROXY RESPONSE END ===');
+    });
   },
   onError: (err, req, res) => {
+    console.error('=== PROXY ERROR ===');
     console.error('Proxy error:', err);
     
     // Respond with JSON error instead of HTML
     res.setHeader('Content-Type', 'application/json');
-    res.status(500).json({ 
+    res.status(502).json({ 
       error: 'Proxy error', 
       message: err.message,
       timestamp: new Date().toISOString()
     });
+    
+    console.error('=== PROXY ERROR END ===');
   }
 }));
 

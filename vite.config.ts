@@ -17,11 +17,11 @@ export default defineConfig(({ mode }) => ({
         rewrite: (path) => path.replace(/^\/api\/claude/, ''),
         secure: true,
         configure: (proxy, _options) => {
-          proxy.on('error', (err, _req, _res) => {
+          proxy.on('error', (err, _req, _res, _target) => {
             console.error('Proxy error:', err);
           });
           
-          proxy.on('proxyReq', (proxyReq, req, _res) => {
+          proxy.on('proxyReq', (proxyReq, req, _res, _options) => {
             console.log('Proxying request to Claude API with method:', req.method);
             console.log('Original URL:', req.url);
             console.log('Target URL:', proxyReq.path);
@@ -57,7 +57,7 @@ export default defineConfig(({ mode }) => ({
             ));
           });
           
-          proxy.on('proxyRes', (proxyRes, req, res) => {
+          proxy.on('proxyRes', (proxyRes, req, res, _options) => {
             console.log(`Proxy response status: ${proxyRes.statusCode}`);
             
             // Add CORS headers to response
