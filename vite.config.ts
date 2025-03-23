@@ -85,38 +85,27 @@ export default defineConfig(({ mode }) => ({
               // We want to collect the response to log it for debugging
               let responseBody = '';
               
-              // Fix TypeScript errors by using proper overload signatures
+              // Safely override write and end methods without TypeScript errors
               const originalWrite = res.write;
               const originalEnd = res.end;
               
-              // Override write method with TypeScript-compatible version
-              res.write = function(chunk, encodingOrCallback, callback) {
+              // Create a type-safe override for the write method
+              res.write = function(chunk: any, ...args: any[]): boolean {
                 if (chunk) {
                   responseBody += typeof chunk === 'string' ? chunk : chunk.toString();
                 }
-                
-                // Determine if the second parameter is a callback or encoding
-                if (typeof encodingOrCallback === 'function') {
-                  return originalWrite.call(res, chunk, encodingOrCallback);
-                }
-                
-                return originalWrite.call(res, chunk, encodingOrCallback, callback);
+                return originalWrite.apply(res, [chunk, ...args]);
               };
               
-              // Override end method with TypeScript-compatible version
-              res.end = function(chunk, encodingOrCallback, callback) {
+              // Create a type-safe override for the end method
+              res.end = function(chunk: any, ...args: any[]): any {
                 if (chunk) {
                   responseBody += typeof chunk === 'string' ? chunk : chunk.toString();
                 }
                 
                 console.log('HTML response preview:', responseBody.substring(0, 1000) + '...');
                 
-                // Determine if the second parameter is a callback or encoding
-                if (typeof encodingOrCallback === 'function') {
-                  return originalEnd.call(res, chunk, encodingOrCallback);
-                }
-                
-                return originalEnd.call(res, chunk, encodingOrCallback, callback);
+                return originalEnd.apply(res, [chunk, ...args]);
               };
             }
           });

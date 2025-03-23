@@ -24,49 +24,45 @@ export class ApiService {
     try {
       console.log("Making direct API request to Claude");
       
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
-          "content-type": "application/json",
-          // Add header to indicate this is a browser request
-          "anthropic-dangerous-direct-browser-access": "true"
-        },
-        body: JSON.stringify(options),
-        // Since we can't make direct calls due to CORS, we'll rely on the proxy
-        mode: 'cors',
-        credentials: 'omit'
-      });
-      
-      // Store raw response for debugging
-      const responseText = await response.text();
-      this.lastRawResponse = responseText;
-      
-      // Log full response for debugging
-      console.log("Full Claude API response:", responseText);
-      
-      if (!response.ok) {
-        const errorMsg = `API error: ${response.status}`;
-        console.error(errorMsg, responseText);
-        throw new Error(errorMsg);
-      }
-      
-      // Check if the response is HTML
-      if (responseText.trim().startsWith('<!DOCTYPE') || 
-          responseText.trim().startsWith('<html') ||
-          responseText.includes('<head>') || 
-          responseText.includes('<body>')) {
-        console.error("Received HTML instead of JSON:", responseText.substring(0, 200));
-        throw new Error('Received HTML instead of JSON');
-      }
-      
-      // Parse JSON response
+      // First attempt with regular mode - this will likely fail with CORS
       try {
-        return JSON.parse(responseText);
+        const response = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+            "anthropic-dangerous-direct-browser-access": "true"
+          },
+          body: JSON.stringify(options),
+          mode: 'cors',
+          credentials: 'omit'
+        });
+        
+        // Store raw response for debugging
+        const responseText = await response.text();
+        this.lastRawResponse = responseText;
+        
+        // Log full response for debugging
+        console.log("Full Claude API response:", responseText);
+        
+        if (!response.ok) {
+          const errorMsg = `API error: ${response.status}`;
+          console.error(errorMsg, responseText);
+          throw new Error(errorMsg);
+        }
+        
+        // Parse JSON response
+        try {
+          return JSON.parse(responseText);
+        } catch (error) {
+          console.error("Failed to parse response as JSON:", error);
+          throw new Error('Invalid JSON response');
+        }
       } catch (error) {
-        console.error("Failed to parse response as JSON:", error);
-        throw new Error('Invalid JSON response');
+        console.error("Error with direct API call:", error);
+        // Don't attempt no-cors mode as it won't return JSON anyway
+        throw error;
       }
     } catch (error) {
       console.error("Error calling Claude API directly:", error);
@@ -134,21 +130,6 @@ export class ApiService {
     } catch (error) {
       console.error("Error calling Claude API via proxy:", error);
       throw error;
-    }
-  }
-  
-  // Try both direct API and proxy, with fallback logic
-  static async callClaudeWithFallback(
-    apiKey: string,
-    options: ClaudeRequestOptions
-  ): Promise<any> {
-    try {
-      // Try proxy first since direct will fail with CORS
-      return await this.callClaudeApiViaProxy(apiKey, options);
-    } catch (error) {
-      console.log("Proxy call failed, trying direct API (though likely to fail due to CORS):", error);
-      // Then try direct API as fallback
-      return await this.callClaudeApi(apiKey, options);
     }
   }
   

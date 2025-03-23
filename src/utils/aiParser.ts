@@ -82,7 +82,7 @@ export const parseTransactionsWithAI = async (
     };
     
     try {
-      // Direct API will likely fail due to CORS, so we'll try proxy first
+      // Try API via proxy - this is our primary method
       console.log("Attempting to call Claude API via proxy...");
       const data = await ApiService.callClaudeApiViaProxy(apiKey, options);
       
@@ -120,7 +120,7 @@ export const parseTransactionsWithAI = async (
     } catch (apiError: any) {
       console.error("API request failed:", apiError);
       
-      // If we got an error about HTML response
+      // Detailed error message for HTML responses
       if (apiError.message && apiError.message.includes('HTML')) {
         throw new Error('Received HTML instead of JSON. The server is likely returning an error page or CORS issue. Check the debug modal for details.');
       }

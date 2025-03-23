@@ -16,11 +16,18 @@ app.use((req, res, next) => {
   next();
 });
 
-// CORS middleware for all requests
+// CORS middleware for all requests - make sure to add proper headers
 app.use((req, res, next) => {
+  // Allow any origin instead of specific ones
   res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, x-api-key, anthropic-version, anthropic-dangerous-direct-browser-access');
+  // Allow more HTTP methods
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  // Allow all headers that Claude API requires
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, x-api-key, anthropic-version, anthropic-dangerous-direct-browser-access, Authorization');
+  // Allow credentials
+  res.header('Access-Control-Allow-Credentials', 'true');
+  // Increase max age for preflight requests
+  res.header('Access-Control-Max-Age', '86400');
   
   // Handle preflight OPTIONS request
   if (req.method === 'OPTIONS') {
@@ -29,6 +36,10 @@ app.use((req, res, next) => {
   
   next();
 });
+
+// Body parser middleware
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Proxy middleware for Claude API in production
 app.use('/api/claude', createProxyMiddleware({
@@ -68,23 +79,11 @@ app.use('/api/claude', createProxyMiddleware({
     }
     
     // Log the modified headers
-    console.log('Production proxy request headers:', Array.from(Object.keys(proxyReq.getHeaders())).join(', '));
+    console.log('Production proxy request headers:', proxyReq.getHeaders());
     
     // Log the request body if it exists
     if (req.body) {
-      let bodyData = req.body;
-      // If bodyData is a buffer or string, convert it to an object
-      if (Buffer.isBuffer(bodyData)) {
-        bodyData = bodyData.toString();
-      }
-      if (typeof bodyData === 'string') {
-        try {
-          bodyData = JSON.parse(bodyData);
-        } catch (e) {
-          console.log('Could not parse body as JSON');
-        }
-      }
-      console.log('Request body:', typeof bodyData === 'object' ? JSON.stringify(bodyData, null, 2) : bodyData);
+      console.log('Request body:', JSON.stringify(req.body, null, 2));
     }
   },
   onProxyRes: (proxyRes, req, res) => {
@@ -92,10 +91,12 @@ app.use('/api/claude', createProxyMiddleware({
     console.log('Claude API response status:', proxyRes.statusCode);
     console.log('Claude API response headers:', proxyRes.headers);
     
-    // Add CORS headers
+    // Add comprehensive CORS headers to response
     proxyRes.headers['Access-Control-Allow-Origin'] = '*';
-    proxyRes.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS';
-    proxyRes.headers['Access-Control-Allow-Headers'] = 'Content-Type, x-api-key, anthropic-version, anthropic-dangerous-direct-browser-access';
+    proxyRes.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
+    proxyRes.headers['Access-Control-Allow-Headers'] = 'Origin, X-Requested-With, Content-Type, Accept, x-api-key, anthropic-version, anthropic-dangerous-direct-browser-access, Authorization';
+    proxyRes.headers['Access-Control-Allow-Credentials'] = 'true';
+    proxyRes.headers['Access-Control-Max-Age'] = '86400';
     
     // Log content type for debugging
     console.log('Response content-type:', proxyRes.headers['content-type']);
