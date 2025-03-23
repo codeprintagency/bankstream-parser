@@ -1,8 +1,10 @@
+
 import React, { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
 import { Upload, FileText, Check, AlertCircle } from "lucide-react";
 import { convertPdfToExcel, generateExcelFile, downloadExcelFile, Transaction } from "@/utils/fileConverter";
+import TransactionTable from "./TransactionTable";
 
 const FileUpload: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
@@ -64,7 +66,7 @@ const FileUpload: React.FC = () => {
       
       toast({
         title: "Conversion Successful",
-        description: "Your bank statement has been converted to Excel format",
+        description: `${extractedTransactions.length} transactions have been extracted from your statement`,
       });
     } catch (error) {
       console.error("Conversion error:", error);
@@ -136,7 +138,7 @@ const FileUpload: React.FC = () => {
           
           <p className="text-muted-foreground mb-6 max-w-lg">
             {isConverted 
-              ? "Your bank statement has been successfully converted to Excel format." 
+              ? `${transactions.length} transactions have been extracted from your statement` 
               : file 
                 ? `Selected file: ${file.name}` 
                 : "Drag and drop your PDF bank statement here, or click to browse files"
@@ -196,6 +198,10 @@ const FileUpload: React.FC = () => {
             </div>
           )}
         </div>
+        
+        {isConverted && transactions.length > 0 && (
+          <TransactionTable transactions={transactions} />
+        )}
         
         <div className="mt-4 flex items-center justify-center text-xs text-muted-foreground">
           <AlertCircle className="w-3 h-3 mr-1" />
