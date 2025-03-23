@@ -2,9 +2,15 @@
 import React, { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
-import { Upload, FileText, Check, AlertCircle } from "lucide-react";
+import { Upload, FileText, Check, AlertCircle, Zap } from "lucide-react";
 import { convertPdfToExcel, generateExcelFile, downloadExcelFile, Transaction } from "@/utils/fileConverter";
+import { parseTransactionsWithAI, hasPremiumAccess, togglePremiumAccess } from "@/utils/aiParser";
 import TransactionTable from "./TransactionTable";
+import { extractTextFromPdf } from "@/utils/fileConverter";
+import { Switch } from "@/components/ui/switch";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 
 const FileUpload: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
@@ -12,6 +18,10 @@ const FileUpload: React.FC = () => {
   const [isConverting, setIsConverting] = useState(false);
   const [isConverted, setIsConverted] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [useAI, setUseAI] = useState(false);
+  const [apiKey, setApiKey] = useState("");
+  const [isPremium, setIsPremium] = useState(() => hasPremiumAccess());
+  const [apiKeyDialogOpen, setApiKeyDialogOpen] = useState(false);
   const { toast } = useToast();
 
   const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
@@ -53,21 +63,64 @@ const FileUpload: React.FC = () => {
     }
   }, [toast]);
 
+  const togglePremium = useCallback(() => {
+    const status = togglePremiumAccess();
+    setIsPremium(status);
+    toast({
+      title: status ? "Premium Activated" : "Premium Deactivated",
+      description: status 
+        ? "You now have access to AI parsing features" 
+        : "AI parsing features are now disabled",
+    });
+  }, [toast]);
+
   const handleConvert = useCallback(async () => {
     if (!file) return;
     
     setIsConverting(true);
     
     try {
-      // Use the actual conversion function
-      const extractedTransactions = await convertPdfToExcel(file);
-      setTransactions(extractedTransactions);
-      setIsConverted(true);
+      if (useAI) {
+        // Check if premium and API key are available
+        if (!isPremium) {
+          toast({
+            title: "Premium Feature",
+            description: "AI parsing requires premium access. Enable it in settings.",
+            variant: "destructive",
+          });
+          setIsConverting(false);
+          return;
+        }
+        
+        if (!apiKey) {
+          setApiKeyDialogOpen(true);
+          setIsConverting(false);
+          return;
+        }
+        
+        // Extract text from PDF for AI processing
+        const extractedText = await extractTextFromPdf(file);
+        
+        // Use AI parsing
+        const aiExtractedTransactions = await parseTransactionsWithAI(extractedText, apiKey);
+        setTransactions(aiExtractedTransactions);
+        
+        toast({
+          title: "AI Conversion Successful",
+          description: `${aiExtractedTransactions.length} transactions have been extracted by Claude AI`,
+        });
+      } else {
+        // Use traditional parsing
+        const extractedTransactions = await convertPdfToExcel(file);
+        setTransactions(extractedTransactions);
+        
+        toast({
+          title: "Conversion Successful",
+          description: `${extractedTransactions.length} transactions have been extracted from your statement`,
+        });
+      }
       
-      toast({
-        title: "Conversion Successful",
-        description: `${extractedTransactions.length} transactions have been extracted from your statement`,
-      });
+      setIsConverted(true);
     } catch (error) {
       console.error("Conversion error:", error);
       toast({
@@ -78,7 +131,7 @@ const FileUpload: React.FC = () => {
     } finally {
       setIsConverting(false);
     }
-  }, [file, toast]);
+  }, [file, toast, useAI, isPremium, apiKey]);
 
   const handleDownload = useCallback(() => {
     if (transactions.length === 0) return;
@@ -102,9 +155,56 @@ const FileUpload: React.FC = () => {
     }
   }, [transactions, toast]);
 
+  const saveApiKey = useCallback(() => {
+    if (!apiKey) {
+      toast({
+        title: "API Key Required",
+        description: "Please enter your Claude API key",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    toast({
+      title: "API Key Saved",
+      description: "Your Claude API key has been saved for this session",
+    });
+    
+    setApiKeyDialogOpen(false);
+    
+    // Retry conversion if a file is selected
+    if (file) {
+      handleConvert();
+    }
+  }, [apiKey, file, handleConvert, toast]);
+
   return (
     <section id="file-upload-section" className="container mx-auto px-4 md:px-8 py-16 md:py-24">
       <div className="max-w-4xl mx-auto">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center space-x-2">
+            <Switch 
+              id="parsing-mode" 
+              checked={useAI} 
+              onCheckedChange={setUseAI} 
+              disabled={isConverting}
+            />
+            <Label htmlFor="parsing-mode" className="flex items-center">
+              <span>AI Parsing</span>
+              {useAI && <Zap className="w-4 h-4 ml-1 text-yellow-500" />}
+            </Label>
+          </div>
+          
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className={isPremium ? "bg-gradient-to-r from-yellow-400 to-yellow-600 text-white hover:from-yellow-500 hover:to-yellow-700" : ""}
+            onClick={togglePremium}
+          >
+            {isPremium ? "Premium Active" : "Enable Premium"}
+          </Button>
+        </div>
+        
         <div
           className={`
             border-2 border-dashed rounded-2xl p-8 md:p-12 transition-all duration-300
@@ -140,8 +240,8 @@ const FileUpload: React.FC = () => {
             {isConverted 
               ? `${transactions.length} transactions have been extracted from your statement` 
               : file 
-                ? `Selected file: ${file.name}` 
-                : "Drag and drop your PDF bank statement here, or click to browse files"
+                ? `Selected file: ${file.name}${useAI ? " (AI Mode)" : ""}` 
+                : `Drag and drop your PDF bank statement here, or click to browse files${useAI ? ". Using AI mode" : ""}`
             }
           </p>
           
@@ -168,7 +268,7 @@ const FileUpload: React.FC = () => {
               disabled={isConverting}
               className="relative"
             >
-              {isConverting ? "Converting..." : "Convert to Excel"}
+              {isConverting ? "Converting..." : useAI ? "Convert with Claude AI" : "Convert to Excel"}
               {isConverting && (
                 <span className="absolute inset-0 flex items-center justify-center">
                   <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
@@ -208,6 +308,32 @@ const FileUpload: React.FC = () => {
           <span>Bank statements are processed securely and never stored on our servers</span>
         </div>
       </div>
+      
+      {/* Claude API Key Dialog */}
+      <Dialog open={apiKeyDialogOpen} onOpenChange={setApiKeyDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Enter Your Claude API Key</DialogTitle>
+            <DialogDescription>
+              We need your Claude API key to process the bank statement. 
+              This key is only used for the current session and is not stored on our servers.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="api-key">Claude API Key</Label>
+              <Input
+                id="api-key" 
+                type="password"
+                placeholder="sk-ant-api..." 
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+              />
+            </div>
+            <Button onClick={saveApiKey} className="w-full">Save Key & Continue</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 };

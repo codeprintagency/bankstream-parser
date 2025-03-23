@@ -13,7 +13,7 @@ export interface Transaction {
 }
 
 // Function to extract text content from a PDF file
-async function extractTextFromPdf(file: File): Promise<string[]> {
+export async function extractTextFromPdf(file: File): Promise<string[]> {
   return new Promise(async (resolve, reject) => {
     try {
       // Convert the file to ArrayBuffer
