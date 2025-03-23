@@ -1,5 +1,5 @@
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -12,7 +12,21 @@ interface DebugModalProps {
 }
 
 const DebugModal: React.FC<DebugModalProps> = ({ open, onOpenChange }) => {
-  const htmlResponse = getLastHtmlResponse();
+  const [htmlResponse, setHtmlResponse] = useState<string>("");
+  const [isHtml, setIsHtml] = useState<boolean>(false);
+  
+  useEffect(() => {
+    if (open) {
+      const response = getLastHtmlResponse();
+      setHtmlResponse(response);
+      
+      // Check if the response appears to be HTML
+      setIsHtml(response.trim().startsWith('<!DOCTYPE') || 
+                response.trim().startsWith('<html') || 
+                response.includes('<head>') || 
+                response.includes('<body>'));
+    }
+  }, [open]);
   
   const copyToClipboard = () => {
     navigator.clipboard.writeText(htmlResponse);
@@ -24,7 +38,9 @@ const DebugModal: React.FC<DebugModalProps> = ({ open, onOpenChange }) => {
         <DialogHeader>
           <DialogTitle>Claude API Response</DialogTitle>
           <DialogDescription>
-            Showing the raw response from the Claude API
+            {isHtml 
+              ? "Received HTML instead of JSON from the Claude API" 
+              : "Showing the raw response from the Claude API"}
           </DialogDescription>
         </DialogHeader>
         
@@ -37,7 +53,7 @@ const DebugModal: React.FC<DebugModalProps> = ({ open, onOpenChange }) => {
         <Tabs defaultValue="raw">
           <TabsList className="mb-2">
             <TabsTrigger value="raw">Raw Response</TabsTrigger>
-            <TabsTrigger value="preview">HTML Preview</TabsTrigger>
+            {isHtml && <TabsTrigger value="preview">HTML Preview</TabsTrigger>}
           </TabsList>
           
           <TabsContent value="raw">
@@ -48,22 +64,24 @@ const DebugModal: React.FC<DebugModalProps> = ({ open, onOpenChange }) => {
             </ScrollArea>
           </TabsContent>
           
-          <TabsContent value="preview">
-            <div className="h-[60vh] border rounded-md overflow-auto p-0">
-              {htmlResponse ? (
-                <iframe 
-                  srcDoc={htmlResponse}
-                  className="w-full h-full border-0"
-                  title="HTML Preview"
-                  sandbox="allow-same-origin allow-scripts"
-                />
-              ) : (
-                <div className="flex items-center justify-center h-full text-muted-foreground">
-                  No response available yet. Try making a request first.
-                </div>
-              )}
-            </div>
-          </TabsContent>
+          {isHtml && (
+            <TabsContent value="preview">
+              <div className="h-[60vh] border rounded-md overflow-auto p-0">
+                {htmlResponse ? (
+                  <iframe 
+                    srcDoc={htmlResponse}
+                    className="w-full h-full border-0"
+                    title="HTML Preview"
+                    sandbox="allow-same-origin allow-scripts"
+                  />
+                ) : (
+                  <div className="flex items-center justify-center h-full text-muted-foreground">
+                    No HTML response available yet.
+                  </div>
+                )}
+              </div>
+            </TabsContent>
+          )}
         </Tabs>
       </DialogContent>
     </Dialog>

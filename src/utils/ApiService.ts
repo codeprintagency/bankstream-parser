@@ -13,6 +13,9 @@ interface ClaudeRequestOptions {
 }
 
 export class ApiService {
+  // Storage for raw responses for debugging
+  static lastRawResponse: string = '';
+  
   // Make a direct API request to Claude
   static async callClaudeApi(
     apiKey: string,
@@ -31,11 +34,29 @@ export class ApiService {
         body: JSON.stringify(options)
       });
       
+      // Store raw response for debugging
+      const responseText = await response.text();
+      this.lastRawResponse = responseText;
+      
+      // Log full response for debugging
+      console.log("Full Claude API response:", responseText);
+      
       if (!response.ok) {
         throw new Error(`API error: ${response.status}`);
       }
       
-      return await response.json();
+      // Check if the response is HTML
+      if (responseText.trim().startsWith('<!DOCTYPE') || responseText.trim().startsWith('<html')) {
+        throw new Error('Received HTML instead of JSON');
+      }
+      
+      // Parse JSON response
+      try {
+        return JSON.parse(responseText);
+      } catch (error) {
+        console.error("Failed to parse response as JSON:", error);
+        throw new Error('Invalid JSON response');
+      }
     } catch (error) {
       console.error("Error calling Claude API directly:", error);
       throw error;
@@ -67,18 +88,29 @@ export class ApiService {
         body: JSON.stringify(options)
       });
       
+      // Store raw response for debugging
+      const responseText = await response.text();
+      this.lastRawResponse = responseText;
+      
+      // Log full response for debugging
+      console.log("Full proxy response:", responseText);
+      
       if (!response.ok) {
         throw new Error(`Proxy error: ${response.status}`);
       }
-      
-      const responseText = await response.text();
       
       // Check if the response is HTML
       if (responseText.trim().startsWith('<!DOCTYPE') || responseText.trim().startsWith('<html')) {
         throw new Error('Received HTML instead of JSON');
       }
       
-      return JSON.parse(responseText);
+      // Parse JSON response
+      try {
+        return JSON.parse(responseText);
+      } catch (error) {
+        console.error("Failed to parse response as JSON:", error);
+        throw new Error('Invalid JSON response');
+      }
     } catch (error) {
       console.error("Error calling Claude API via proxy:", error);
       throw error;
@@ -99,5 +131,10 @@ export class ApiService {
       // Then try proxy
       return await this.callClaudeApiViaProxy(apiKey, options);
     }
+  }
+  
+  // Get the last raw response for debugging
+  static getLastRawResponse(): string {
+    return this.lastRawResponse;
   }
 }

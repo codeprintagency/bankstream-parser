@@ -20,6 +20,7 @@ const FileUpload: React.FC = () => {
   const [useAI, setUseAI] = useState(false);
   const [isPremium, setIsPremium] = useState(() => hasPremiumAccess());
   const [debugModalOpen, setDebugModalOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
 
   const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
@@ -76,6 +77,7 @@ const FileUpload: React.FC = () => {
     if (!file) return;
     
     setIsConverting(true);
+    setError(null);
     
     try {
       if (useAI) {
@@ -99,7 +101,7 @@ const FileUpload: React.FC = () => {
             description: "Sending to Claude AI for analysis (this may take a moment)...",
           });
           
-          // Use AI parsing with the default API key (already set in aiParser.ts)
+          // Use AI parsing with the default API key
           const aiExtractedTransactions = await parseTransactionsWithAI(extractedText);
           setTransactions(aiExtractedTransactions);
           
@@ -107,21 +109,22 @@ const FileUpload: React.FC = () => {
             title: "AI Conversion Successful",
             description: `${aiExtractedTransactions.length} transactions have been extracted from your statement`,
           });
-        } catch (aiError) {
+          
+          setIsConverted(true);
+        } catch (aiError: any) {
           console.error("AI parsing failed:", aiError);
           
-          // Open debug modal to show the HTML response
+          // Set error message and open debug modal
+          setError(aiError.message || "AI parsing failed");
           setDebugModalOpen(true);
           
-          // Fallback to traditional parsing if AI fails
           toast({
             title: "AI Parsing Failed",
-            description: "Falling back to standard parsing method. Click Debug to see details.",
+            description: aiError.message || "Unknown error occurred",
             variant: "destructive",
           });
           
-          const extractedTransactions = await convertPdfToExcel(file);
-          setTransactions(extractedTransactions);
+          // Don't fall back to traditional parsing, just show the error
         }
       } else {
         // Use traditional parsing
@@ -132,14 +135,16 @@ const FileUpload: React.FC = () => {
           title: "Conversion Successful",
           description: `${extractedTransactions.length} transactions have been extracted from your statement`,
         });
+        
+        setIsConverted(true);
       }
-      
-      setIsConverted(true);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Conversion error:", error);
+      setError(error.message || "Unknown error occurred");
+      
       toast({
         title: "Conversion Failed",
-        description: "There was an error converting your file. Please try again.",
+        description: error.message || "There was an error converting your file. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -208,11 +213,30 @@ const FileUpload: React.FC = () => {
           </div>
         </div>
         
+        {error && (
+          <div className="mb-4 p-4 border border-red-300 bg-red-50 rounded-md text-red-800 flex items-start">
+            <AlertCircle className="w-5 h-5 mr-2 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="font-semibold">Error</p>
+              <p className="text-sm">{error}</p>
+              <Button 
+                variant="outline" 
+                size="sm"
+                className="mt-2 text-red-800 border-red-300 hover:bg-red-100"
+                onClick={() => setDebugModalOpen(true)}
+              >
+                View Debug Info
+              </Button>
+            </div>
+          </div>
+        )}
+        
         <div
           className={`
             border-2 border-dashed rounded-2xl p-8 md:p-12 transition-all duration-300
             ${isDragging ? "border-primary bg-primary/5" : "border-gray-200 bg-white/50"}
             ${isConverted ? "border-green-500 bg-green-50/50" : ""}
+            ${error ? "border-red-300 bg-red-50/10" : ""}
             glass-card backdrop-blur-sm flex flex-col items-center text-center
             animate-scale-in
           `}
@@ -223,6 +247,8 @@ const FileUpload: React.FC = () => {
           <div className="w-16 h-16 mb-6 rounded-full bg-primary/10 flex items-center justify-center text-primary animate-float">
             {isConverted ? (
               <Check className="w-8 h-8 text-green-500" />
+            ) : error ? (
+              <AlertCircle className="w-8 h-8 text-red-500" />
             ) : file ? (
               <FileText className="w-8 h-8" />
             ) : (
@@ -233,22 +259,26 @@ const FileUpload: React.FC = () => {
           <h2 className="text-2xl md:text-3xl font-semibold mb-3">
             {isConverted 
               ? "Conversion Complete" 
-              : file 
-                ? "Ready to Convert" 
-                : "Upload Your Bank Statement"
+              : error
+                ? "Conversion Failed"
+                : file 
+                  ? "Ready to Convert" 
+                  : "Upload Your Bank Statement"
             }
           </h2>
           
           <p className="text-muted-foreground mb-6 max-w-lg">
             {isConverted 
               ? `${transactions.length} transactions have been extracted from your statement` 
-              : file 
-                ? `Selected file: ${file.name}${useAI ? " (AI Mode)" : ""}` 
-                : `Drag and drop your PDF bank statement here, or click to browse files${useAI ? ". Using AI mode" : ""}`
+              : error
+                ? "An error occurred while processing your file. Check the debug information."
+                : file 
+                  ? `Selected file: ${file.name}${useAI ? " (AI Mode)" : ""}` 
+                  : `Drag and drop your PDF bank statement here, or click to browse files${useAI ? ". Using AI mode" : ""}`
             }
           </p>
           
-          {!file && !isConverted && (
+          {!file && !isConverted && !error && (
             <div className="relative">
               <Button 
                 variant="outline" 
@@ -265,7 +295,7 @@ const FileUpload: React.FC = () => {
             </div>
           )}
           
-          {file && !isConverted && (
+          {file && !isConverted && !error && (
             <Button 
               onClick={handleConvert} 
               disabled={isConverting}
@@ -294,11 +324,23 @@ const FileUpload: React.FC = () => {
                   setFile(null);
                   setIsConverted(false);
                   setTransactions([]);
+                  setError(null);
                 }}
               >
                 Convert Another File
               </Button>
             </div>
+          )}
+          
+          {error && (
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setError(null);
+              }}
+            >
+              Try Again
+            </Button>
           )}
         </div>
         

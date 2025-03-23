@@ -85,23 +85,23 @@ export default defineConfig(({ mode }) => ({
               // We want to collect the response to log it for debugging
               let responseBody = '';
               
+              // Fix TypeScript errors by providing correct argument types
               const originalWrite = res.write;
               const originalEnd = res.end;
               
-              // Fix TypeScript errors by providing correct typing for the functions
-              res.write = function(chunk: any, ...args: any[]) {
+              res.write = function(chunk, encoding, callback) {
                 if (chunk) {
                   responseBody += chunk.toString();
                 }
-                return originalWrite.apply(res, [chunk, ...args]);
+                return originalWrite.call(res, chunk, encoding, callback);
               };
               
-              res.end = function(chunk: any, ...args: any[]) {
+              res.end = function(chunk, encoding, callback) {
                 if (chunk) {
                   responseBody += chunk.toString();
                 }
                 console.log('HTML response preview:', responseBody.substring(0, 1000) + '...');
-                return originalEnd.apply(res, [chunk, ...args]);
+                return originalEnd.call(res, chunk, encoding, callback);
               };
             }
           });
