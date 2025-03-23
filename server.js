@@ -62,6 +62,10 @@ app.use('/api/claude', createProxyMiddleware({
     proxyReq.setHeader('anthropic-version', req.headers['anthropic-version'] || '2023-06-01');
     console.log('Setting anthropic-version header');
     
+    // Add the new direct browser access header
+    proxyReq.setHeader('anthropic-dangerous-direct-browser-access', 'true');
+    console.log('Setting anthropic-dangerous-direct-browser-access header');
+    
     // Content type is critical
     proxyReq.setHeader('content-type', 'application/json');
     console.log('Setting content-type header');

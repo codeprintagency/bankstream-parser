@@ -47,6 +47,10 @@ export default defineConfig(({ mode }) => ({
               console.log('Setting content-type header');
             }
             
+            // Add the new direct browser access header
+            proxyReq.setHeader('anthropic-dangerous-direct-browser-access', 'true');
+            console.log('Setting anthropic-dangerous-direct-browser-access header');
+            
             // Log the modified headers
             console.log('Proxy request headers:', Object.fromEntries(
               Object.entries(proxyReq.getHeaders())
@@ -89,8 +93,8 @@ export default defineConfig(({ mode }) => ({
                 if (chunk) {
                   responseBody += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : chunk;
                 }
-                // Call original with all arguments
-                return originalWrite.apply(res, arguments);
+                // Call original with properly typed arguments
+                return originalWrite.call(res, chunk);
               };
               
               // Safely override end method
@@ -101,8 +105,8 @@ export default defineConfig(({ mode }) => ({
                 
                 console.log('HTML response preview:', responseBody.substring(0, 1000) + '...');
                 
-                // Call original with all arguments
-                return originalEnd.apply(res, arguments);
+                // Call original with properly typed arguments
+                return originalEnd.call(res, chunk);
               };
             }
           });

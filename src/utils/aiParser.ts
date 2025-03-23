@@ -46,7 +46,7 @@ function extractJsonFromResponse(responseText: string): any {
   }
 }
 
-// Parse transactions using Claude AI via the proxy
+// Parse transactions using Claude AI
 export const parseTransactionsWithAI = async (
   pdfText: string[],
   apiKey: string = DEFAULT_CLAUDE_API_KEY
@@ -95,11 +95,12 @@ export const parseTransactionsWithAI = async (
       ]
     };
     
+    // Try direct API access first
     try {
-      // Call the proxy method
-      const data = await ApiService.callClaudeApiViaProxy(apiKey, options);
+      console.log("Trying direct API access with dangerous-direct-browser-access header");
+      const data = await ApiService.callClaudeApi(apiKey, options);
       
-      console.log("Claude response:", data);
+      console.log("Claude direct API response:", data);
       
       if (data && data.content && data.content[0] && data.content[0].text) {
         const content = data.content[0].text;
@@ -120,9 +121,39 @@ export const parseTransactionsWithAI = async (
         console.error('Invalid Claude response structure:', data);
         throw new Error('Invalid Claude response structure');
       }
-    } catch (proxyError: any) {
-      console.error('API request failed:', proxyError);
-      throw new Error(proxyError.message || 'Unknown proxy error occurred');
+    } catch (directApiError: any) {
+      console.error('Direct API access failed:', directApiError);
+      console.log('Falling back to proxy...');
+      
+      // Fall back to proxy if direct access fails
+      try {
+        const data = await ApiService.callClaudeApiViaProxy(apiKey, options);
+        
+        console.log("Claude proxy response:", data);
+        
+        if (data && data.content && data.content[0] && data.content[0].text) {
+          const content = data.content[0].text;
+          console.log("Claude content:", content.substring(0, 200) + "...");
+          
+          // Try to parse the content as JSON or extract JSON from it
+          try {
+            const transactions: Transaction[] = extractJsonFromResponse(content);
+            console.log(`Parsed ${transactions.length} transactions from Claude response`);
+            return transactions;
+          } catch (jsonError) {
+            console.error('Could not parse JSON in Claude response', jsonError);
+            console.error('Claude response content:', content);
+            
+            throw new Error('Failed to parse JSON from Claude response');
+          }
+        } else {
+          console.error('Invalid Claude response structure:', data);
+          throw new Error('Invalid Claude response structure');
+        }
+      } catch (proxyError: any) {
+        console.error('Proxy API request also failed:', proxyError);
+        throw new Error(proxyError.message || 'Both direct API and proxy methods failed. Check the debug modal for details.');
+      }
     }
   } catch (error: any) {
     console.error('Error parsing with AI:', error);
