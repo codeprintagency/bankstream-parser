@@ -1,7 +1,7 @@
 
 import { Transaction } from "./fileConverter";
 
-// Default API key for Claude (for demo purposes)
+// Default API key for Claude (provided by the user)
 const DEFAULT_CLAUDE_API_KEY = "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";
 
 // Check if a user has premium access
