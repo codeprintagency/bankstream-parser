@@ -3,12 +3,14 @@ import React, { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
 import { Upload, FileText, Check, AlertCircle } from "lucide-react";
+import { convertPdfToExcel, generateExcelFile, downloadExcelFile, Transaction } from "@/utils/fileConverter";
 
 const FileUpload: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isConverting, setIsConverting] = useState(false);
   const [isConverted, setIsConverted] = useState(false);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const { toast } = useToast();
 
   const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
@@ -50,22 +52,54 @@ const FileUpload: React.FC = () => {
     }
   }, [toast]);
 
-  const handleConvert = useCallback(() => {
+  const handleConvert = useCallback(async () => {
     if (!file) return;
     
     setIsConverting(true);
     
-    // Simulate conversion process
-    setTimeout(() => {
-      setIsConverting(false);
+    try {
+      // Use the actual conversion function
+      const extractedTransactions = await convertPdfToExcel(file);
+      setTransactions(extractedTransactions);
       setIsConverted(true);
       
       toast({
         title: "Conversion Successful",
         description: "Your bank statement has been converted to Excel format",
       });
-    }, 2000);
+    } catch (error) {
+      console.error("Conversion error:", error);
+      toast({
+        title: "Conversion Failed",
+        description: "There was an error converting your file. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsConverting(false);
+    }
   }, [file, toast]);
+
+  const handleDownload = useCallback(() => {
+    if (transactions.length === 0) return;
+    
+    try {
+      // Generate and download the Excel file
+      const excelData = generateExcelFile(transactions);
+      downloadExcelFile(excelData, `bank-statement-${new Date().toISOString().slice(0, 10)}.xlsx`);
+      
+      toast({
+        title: "Download Started",
+        description: "Your Excel file is being downloaded",
+      });
+    } catch (error) {
+      console.error("Download error:", error);
+      toast({
+        title: "Download Failed",
+        description: "There was an error downloading your file. Please try again.",
+        variant: "destructive",
+      });
+    }
+  }, [transactions, toast]);
 
   return (
     <section className="container mx-auto px-4 md:px-8 py-16 md:py-24">
@@ -144,7 +178,10 @@ const FileUpload: React.FC = () => {
           
           {isConverted && (
             <div className="flex flex-col sm:flex-row gap-4">
-              <Button className="bg-green-500 hover:bg-green-600">
+              <Button 
+                className="bg-green-500 hover:bg-green-600"
+                onClick={handleDownload}
+              >
                 Download Excel File
               </Button>
               <Button 
@@ -152,6 +189,7 @@ const FileUpload: React.FC = () => {
                 onClick={() => {
                   setFile(null);
                   setIsConverted(false);
+                  setTransactions([]);
                 }}
               >
                 Convert Another File
