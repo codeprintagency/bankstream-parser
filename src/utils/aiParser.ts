@@ -19,6 +19,13 @@ export const togglePremiumAccess = (): boolean => {
   return newStatus;
 };
 
+// Determines if we're in a development environment
+const isDevelopment = (): boolean => {
+  return process.env.NODE_ENV === 'development' || 
+         window.location.hostname === 'localhost' || 
+         window.location.hostname.includes('127.0.0.1');
+};
+
 // Parse transactions using Claude AI via the proxy
 export const parseTransactionsWithAI = async (
   pdfText: string[],
@@ -51,7 +58,7 @@ export const parseTransactionsWithAI = async (
       }
       
       Here is the bank statement:
-      ${fullText}
+      ${fullText.substring(0, 12000)}
     `;
 
     console.log("Sending request to Claude through proxy with prompt length:", prompt.length);
@@ -60,14 +67,21 @@ export const parseTransactionsWithAI = async (
     const apiUrl = '/api/claude/v1/messages';
     console.log(`Making request to: ${apiUrl}`);
     
-    // Use fetch with mode: 'cors' to allow proper CORS handling
+    // Add a timestamp to prevent caching
+    const timestamp = new Date().getTime();
+    const urlWithTimestamp = `${apiUrl}?_t=${timestamp}`;
+    
+    // Use fetch with proper headers
     const requestOptions = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
+        'anthropic-dangerous-direct-browser-access': 'true',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
       },
       body: JSON.stringify({
         model: 'claude-3-haiku-20240307',
@@ -84,7 +98,7 @@ export const parseTransactionsWithAI = async (
     console.log("Request headers:", JSON.stringify(requestOptions.headers));
     
     // Make the request
-    const response = await fetch(apiUrl, requestOptions);
+    const response = await fetch(urlWithTimestamp, requestOptions);
     
     // Log the response status and details
     console.log('Claude API response status:', response.status);

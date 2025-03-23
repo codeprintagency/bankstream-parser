@@ -18,7 +18,12 @@ app.use('/api/claude', createProxyMiddleware({
     '^/api/claude': ''
   },
   onProxyReq: (proxyReq, req, res) => {
-    // Copy headers from original request to proxy request
+    // Clean up existing headers that might be causing issues
+    proxyReq.removeHeader('host');
+    proxyReq.removeHeader('origin');
+    proxyReq.removeHeader('referer');
+    
+    // Set important headers
     if (req.headers['x-api-key']) {
       proxyReq.setHeader('x-api-key', req.headers['x-api-key']);
     }
@@ -34,18 +39,34 @@ app.use('/api/claude', createProxyMiddleware({
     if (req.headers['content-type']) {
       proxyReq.setHeader('content-type', req.headers['content-type']);
     }
+    
+    console.log('Production proxy request headers:', Array.from(Object.keys(proxyReq.getHeaders())).join(', '));
   },
   onProxyRes: (proxyRes, req, res) => {
+    // Log response details for debugging
+    console.log('Claude API response status:', proxyRes.statusCode);
+    
     // Add CORS headers
     proxyRes.headers['Access-Control-Allow-Origin'] = '*';
     proxyRes.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS';
     proxyRes.headers['Access-Control-Allow-Headers'] = 'Content-Type, x-api-key, anthropic-version, anthropic-dangerous-direct-browser-access';
+    
+    // Log content type for debugging
+    console.log('Response content-type:', proxyRes.headers['content-type']);
   },
   onError: (err, req, res) => {
-    console.error('Proxy error:', err);
-    res.status(500).send('Proxy error');
+    console.error('Proxy error in production:', err);
+    res.status(500).json({ error: 'Proxy error', message: err.message });
   }
 }));
+
+// Options pre-flight for CORS
+app.options('/api/claude*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, x-api-key, anthropic-version, anthropic-dangerous-direct-browser-access');
+  res.status(200).send();
+});
 
 // Serve static files from the dist directory
 app.use(express.static(path.join(__dirname, 'dist')));

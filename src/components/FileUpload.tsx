@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
@@ -102,6 +103,11 @@ const FileUpload: React.FC = () => {
         const extractedText = await extractTextFromPdf(file);
         
         try {
+          toast({
+            title: "AI Processing",
+            description: "Sending to Claude AI for analysis (this may take a moment)...",
+          });
+          
           // Use AI parsing (with default API key if none provided)
           const aiExtractedTransactions = await parseTransactionsWithAI(extractedText, apiKey || undefined);
           setTransactions(aiExtractedTransactions);

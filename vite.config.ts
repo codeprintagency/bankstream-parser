@@ -25,34 +25,37 @@ export default defineConfig(({ mode }) => ({
             console.log('Proxying request to Claude API with method:', req.method);
             
             // Copy all original request headers to the proxy request
-            Object.keys(req.headers).forEach(key => {
-              if (key !== 'host') { // Skip the host header
-                proxyReq.setHeader(key, req.headers[key]);
-                console.log(`Setting header: ${key}`);
-              }
-            });
+            if (req.headers) {
+              Object.keys(req.headers).forEach(key => {
+                if (key !== 'host') { // Skip the host header
+                  const headerValue = req.headers[key];
+                  if (headerValue) {
+                    proxyReq.setHeader(key, headerValue);
+                    console.log(`Setting header: ${key}`);
+                  }
+                }
+              });
+            }
             
             // Explicitly pass important headers
-            if (req.headers['x-api-key']) {
+            if (req.headers && req.headers['x-api-key']) {
               proxyReq.setHeader('x-api-key', req.headers['x-api-key']);
             }
             
-            if (req.headers['anthropic-version']) {
+            if (req.headers && req.headers['anthropic-version']) {
               proxyReq.setHeader('anthropic-version', req.headers['anthropic-version']);
             }
             
-            if (req.headers['anthropic-dangerous-direct-browser-access']) {
+            if (req.headers && req.headers['anthropic-dangerous-direct-browser-access']) {
               proxyReq.setHeader('anthropic-dangerous-direct-browser-access', req.headers['anthropic-dangerous-direct-browser-access']);
             }
             
-            if (req.headers['content-type']) {
+            if (req.headers && req.headers['content-type']) {
               proxyReq.setHeader('content-type', req.headers['content-type']);
             }
             
-            // Log the request body if it exists
-            if (req.body) {
-              console.log('Request body:', JSON.stringify(req.body).substring(0, 500) + '...');
-            }
+            // We can't access req.body directly in the proxy middleware
+            // If debugging is needed, you would need to use a body parser middleware
           });
           
           proxy.on('proxyRes', (proxyRes, req, res) => {
@@ -71,7 +74,9 @@ export default defineConfig(({ mode }) => ({
             }
             
             // Log response headers for debugging
-            console.log('Response headers:', JSON.stringify(Object.keys(proxyRes.headers)));
+            console.log('Response headers:', JSON.stringify(Object.fromEntries(
+              Object.entries(proxyRes.headers)
+            )));
           });
         }
       }
