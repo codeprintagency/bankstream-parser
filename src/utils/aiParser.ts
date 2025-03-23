@@ -26,6 +26,14 @@ const isDevelopment = (): boolean => {
          window.location.hostname.includes('127.0.0.1');
 };
 
+// Store the HTML response for debugging
+let lastHtmlResponse = '';
+
+// Get the last HTML response for debugging
+export const getLastHtmlResponse = (): string => {
+  return lastHtmlResponse;
+};
+
 // Parse transactions using Claude AI via the proxy
 export const parseTransactionsWithAI = async (
   pdfText: string[],
@@ -71,6 +79,9 @@ export const parseTransactionsWithAI = async (
     const timestamp = new Date().getTime();
     const urlWithTimestamp = `${apiUrl}?_t=${timestamp}`;
     
+    // Try sending a direct request to the Claude API
+    console.log("Using API key:", apiKey ? apiKey.substring(0, 10) + "..." : "No API key provided");
+    
     // Use fetch with proper headers
     const requestOptions = {
       method: 'POST',
@@ -108,12 +119,19 @@ export const parseTransactionsWithAI = async (
       const errorText = await response.text();
       console.error('Claude API error status:', response.status);
       console.error('Claude API error response:', errorText);
+      
+      // Store HTML response
+      lastHtmlResponse = errorText;
+      
       throw new Error(`Claude API error: ${response.status} - ${errorText}`);
     }
     
     // Get the raw response text first to inspect it
     const responseText = await response.text();
     console.log("Raw API response (first 500 chars):", responseText.substring(0, 500) + "...");
+    
+    // Store the response for debugging
+    lastHtmlResponse = responseText;
     
     // Check if the response appears to be HTML
     if (responseText.trim().startsWith('<!DOCTYPE') || responseText.trim().startsWith('<html')) {

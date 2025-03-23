@@ -2,13 +2,14 @@
 import React, { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
-import { Upload, FileText, Check, AlertCircle, Zap } from "lucide-react";
+import { Upload, FileText, Check, AlertCircle, Zap, Bug } from "lucide-react";
 import { convertPdfToExcel, generateExcelFile, downloadExcelFile, Transaction } from "@/utils/fileConverter";
 import { parseTransactionsWithAI, hasPremiumAccess, togglePremiumAccess } from "@/utils/aiParser";
 import TransactionTable from "./TransactionTable";
 import { extractTextFromPdf } from "@/utils/fileConverter";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import DebugModal from "./DebugModal";
 
 const FileUpload: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
@@ -18,6 +19,7 @@ const FileUpload: React.FC = () => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [useAI, setUseAI] = useState(false);
   const [isPremium, setIsPremium] = useState(() => hasPremiumAccess());
+  const [debugModalOpen, setDebugModalOpen] = useState(false);
   const { toast } = useToast();
 
   const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
@@ -108,10 +110,13 @@ const FileUpload: React.FC = () => {
         } catch (aiError) {
           console.error("AI parsing failed:", aiError);
           
+          // Open debug modal to show the HTML response
+          setDebugModalOpen(true);
+          
           // Fallback to traditional parsing if AI fails
           toast({
             title: "AI Parsing Failed",
-            description: "Falling back to standard parsing method",
+            description: "Falling back to standard parsing method. Click Debug to see details.",
             variant: "destructive",
           });
           
@@ -181,14 +186,26 @@ const FileUpload: React.FC = () => {
             </Label>
           </div>
           
-          <Button 
-            variant="outline" 
-            size="sm" 
-            className={isPremium ? "bg-gradient-to-r from-yellow-400 to-yellow-600 text-white hover:from-yellow-500 hover:to-yellow-700" : ""}
-            onClick={togglePremium}
-          >
-            {isPremium ? "Premium Active" : "Enable Premium"}
-          </Button>
+          <div className="flex items-center space-x-2">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className={isPremium ? "bg-gradient-to-r from-yellow-400 to-yellow-600 text-white hover:from-yellow-500 hover:to-yellow-700" : ""}
+              onClick={togglePremium}
+            >
+              {isPremium ? "Premium Active" : "Enable Premium"}
+            </Button>
+            
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setDebugModalOpen(true)}
+              className="flex items-center gap-1"
+            >
+              <Bug className="w-4 h-4" />
+              <span>Debug</span>
+            </Button>
+          </div>
         </div>
         
         <div
@@ -294,6 +311,9 @@ const FileUpload: React.FC = () => {
           <span>Bank statements are processed securely and never stored on our servers</span>
         </div>
       </div>
+      
+      {/* Debug Modal for showing the HTML response */}
+      <DebugModal open={debugModalOpen} onOpenChange={setDebugModalOpen} />
     </section>
   );
 };

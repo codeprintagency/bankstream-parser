@@ -23,39 +23,39 @@ export default defineConfig(({ mode }) => ({
           
           proxy.on('proxyReq', (proxyReq, req, _res) => {
             console.log('Proxying request to Claude API with method:', req.method);
+            console.log('Original URL:', req.url);
+            console.log('Target URL:', proxyReq.path);
             
-            // Copy all original request headers to the proxy request
-            if (req.headers) {
-              Object.keys(req.headers).forEach(key => {
-                if (key !== 'host') { // Skip the host header
-                  const headerValue = req.headers[key];
-                  if (headerValue) {
-                    proxyReq.setHeader(key, headerValue);
-                    console.log(`Setting header: ${key}`);
-                  }
-                }
-              });
-            }
+            // Remove problematic headers
+            proxyReq.removeHeader('host');
+            proxyReq.removeHeader('origin');
+            proxyReq.removeHeader('referer');
             
-            // Explicitly pass important headers
+            // Copy important headers from the original request
             if (req.headers && req.headers['x-api-key']) {
               proxyReq.setHeader('x-api-key', req.headers['x-api-key']);
+              console.log('Setting x-api-key header');
             }
             
             if (req.headers && req.headers['anthropic-version']) {
               proxyReq.setHeader('anthropic-version', req.headers['anthropic-version']);
+              console.log('Setting anthropic-version header');
             }
             
             if (req.headers && req.headers['anthropic-dangerous-direct-browser-access']) {
               proxyReq.setHeader('anthropic-dangerous-direct-browser-access', req.headers['anthropic-dangerous-direct-browser-access']);
+              console.log('Setting anthropic-dangerous-direct-browser-access header');
             }
             
             if (req.headers && req.headers['content-type']) {
               proxyReq.setHeader('content-type', req.headers['content-type']);
+              console.log('Setting content-type header');
             }
             
-            // We can't access req.body directly in the proxy middleware
-            // If debugging is needed, you would need to use a body parser middleware
+            // Log the modified headers
+            console.log('Proxy request headers:', Object.fromEntries(
+              Object.entries(proxyReq.getHeaders())
+            ));
           });
           
           proxy.on('proxyRes', (proxyRes, req, res) => {
@@ -77,6 +77,32 @@ export default defineConfig(({ mode }) => ({
             console.log('Response headers:', JSON.stringify(Object.fromEntries(
               Object.entries(proxyRes.headers)
             )));
+            
+            // Check if the response is HTML instead of JSON
+            if (proxyRes.headers['content-type'] && proxyRes.headers['content-type'].includes('text/html')) {
+              console.log('WARNING: Received HTML instead of JSON from Claude API');
+              
+              // We want to collect the response to log it for debugging
+              let responseBody = '';
+              
+              const originalWrite = res.write;
+              const originalEnd = res.end;
+              
+              res.write = function(chunk, ...args) {
+                if (chunk) {
+                  responseBody += chunk.toString();
+                }
+                return originalWrite.apply(res, [chunk, ...args]);
+              };
+              
+              res.end = function(chunk, ...args) {
+                if (chunk) {
+                  responseBody += chunk.toString();
+                }
+                console.log('HTML response preview:', responseBody.substring(0, 1000) + '...');
+                return originalEnd.apply(res, [chunk, ...args]);
+              };
+            }
           });
         }
       }
