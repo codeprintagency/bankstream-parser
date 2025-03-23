@@ -85,23 +85,38 @@ export default defineConfig(({ mode }) => ({
               // We want to collect the response to log it for debugging
               let responseBody = '';
               
-              // Fix TypeScript errors by providing correct argument types
+              // Fix TypeScript errors by using proper overload signatures
               const originalWrite = res.write;
               const originalEnd = res.end;
               
-              res.write = function(chunk, encoding, callback) {
+              // Override write method with TypeScript-compatible version
+              res.write = function(chunk, encodingOrCallback, callback) {
                 if (chunk) {
-                  responseBody += chunk.toString();
+                  responseBody += typeof chunk === 'string' ? chunk : chunk.toString();
                 }
-                return originalWrite.call(res, chunk, encoding, callback);
+                
+                // Determine if the second parameter is a callback or encoding
+                if (typeof encodingOrCallback === 'function') {
+                  return originalWrite.call(res, chunk, encodingOrCallback);
+                }
+                
+                return originalWrite.call(res, chunk, encodingOrCallback, callback);
               };
               
-              res.end = function(chunk, encoding, callback) {
+              // Override end method with TypeScript-compatible version
+              res.end = function(chunk, encodingOrCallback, callback) {
                 if (chunk) {
-                  responseBody += chunk.toString();
+                  responseBody += typeof chunk === 'string' ? chunk : chunk.toString();
                 }
+                
                 console.log('HTML response preview:', responseBody.substring(0, 1000) + '...');
-                return originalEnd.call(res, chunk, encoding, callback);
+                
+                // Determine if the second parameter is a callback or encoding
+                if (typeof encodingOrCallback === 'function') {
+                  return originalEnd.call(res, chunk, encodingOrCallback);
+                }
+                
+                return originalEnd.call(res, chunk, encodingOrCallback, callback);
               };
             }
           });

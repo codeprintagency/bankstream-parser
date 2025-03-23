@@ -16,6 +16,20 @@ app.use((req, res, next) => {
   next();
 });
 
+// CORS middleware for all requests
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, x-api-key, anthropic-version, anthropic-dangerous-direct-browser-access');
+  
+  // Handle preflight OPTIONS request
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  
+  next();
+});
+
 // Proxy middleware for Claude API in production
 app.use('/api/claude', createProxyMiddleware({
   target: 'https://api.anthropic.com',
@@ -41,6 +55,11 @@ app.use('/api/claude', createProxyMiddleware({
     if (req.headers['anthropic-version']) {
       proxyReq.setHeader('anthropic-version', req.headers['anthropic-version']);
       console.log('Setting anthropic-version header');
+    }
+    
+    if (req.headers['anthropic-dangerous-direct-browser-access']) {
+      proxyReq.setHeader('anthropic-dangerous-direct-browser-access', req.headers['anthropic-dangerous-direct-browser-access']);
+      console.log('Setting anthropic-dangerous-direct-browser-access header');
     }
     
     if (req.headers['content-type']) {
@@ -76,7 +95,7 @@ app.use('/api/claude', createProxyMiddleware({
     // Add CORS headers
     proxyRes.headers['Access-Control-Allow-Origin'] = '*';
     proxyRes.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS';
-    proxyRes.headers['Access-Control-Allow-Headers'] = 'Content-Type, x-api-key, anthropic-version';
+    proxyRes.headers['Access-Control-Allow-Headers'] = 'Content-Type, x-api-key, anthropic-version, anthropic-dangerous-direct-browser-access';
     
     // Log content type for debugging
     console.log('Response content-type:', proxyRes.headers['content-type']);
@@ -88,7 +107,7 @@ app.use('/api/claude', createProxyMiddleware({
       // Create a stream to collect the response data
       let responseBody = '';
       proxyRes.on('data', (chunk) => {
-        responseBody += chunk;
+        responseBody += chunk.toString();
       });
       
       proxyRes.on('end', () => {
@@ -102,14 +121,6 @@ app.use('/api/claude', createProxyMiddleware({
     res.status(500).json({ error: 'Proxy error', message: err.message });
   }
 }));
-
-// Options pre-flight for CORS
-app.options('/api/claude*', (req, res) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, x-api-key, anthropic-version');
-  res.status(200).send();
-});
 
 // Serve static files from the dist directory
 app.use(express.static(path.join(__dirname, 'dist')));

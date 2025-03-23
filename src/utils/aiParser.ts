@@ -82,8 +82,10 @@ export const parseTransactionsWithAI = async (
     };
     
     try {
-      // Make API request using our service
-      const data = await ApiService.callClaudeWithFallback(apiKey, options);
+      // Direct API will likely fail due to CORS, so we'll try proxy first
+      console.log("Attempting to call Claude API via proxy...");
+      const data = await ApiService.callClaudeApiViaProxy(apiKey, options);
+      
       console.log("Claude response:", data);
       
       if (data && data.content && data.content[0] && data.content[0].text) {
@@ -115,16 +117,31 @@ export const parseTransactionsWithAI = async (
         console.error('Invalid Claude response structure:', data);
         throw new Error('Invalid Claude response structure');
       }
-    } catch (apiError) {
+    } catch (apiError: any) {
       console.error("API request failed:", apiError);
       
-      // Throw the error directly so we can see it in the UI
-      throw apiError;
+      // If we got an error about HTML response
+      if (apiError.message && apiError.message.includes('HTML')) {
+        throw new Error('Received HTML instead of JSON. The server is likely returning an error page or CORS issue. Check the debug modal for details.');
+      }
+      
+      // If we got a CORS error
+      if (apiError.message && apiError.message.includes('CORS')) {
+        throw new Error('CORS policy prevented API access. The browser blocked the request for security reasons. Try using the proxy server instead.');
+      }
+
+      // If it's a network error (e.g., Failed to fetch)
+      if (apiError.name === 'TypeError' && apiError.message.includes('fetch')) {
+        throw new Error('Network error: Could not connect to the API. This may be due to CORS restrictions or network connectivity issues.');
+      }
+      
+      // Generic error
+      throw new Error(`Error calling Claude API: ${apiError.message || 'Unknown error'}`);
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error parsing with AI:', error);
     
-    // Throw the error rather than falling back
-    throw error;
+    // Throw with a better error message
+    throw new Error(`${error.message || 'Unknown error occurred while parsing with AI'}`);
   }
 };

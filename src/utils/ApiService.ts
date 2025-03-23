@@ -30,8 +30,13 @@ export class ApiService {
           "x-api-key": apiKey,
           "anthropic-version": "2023-06-01",
           "content-type": "application/json",
+          // Add header to indicate this is a browser request
+          "anthropic-dangerous-direct-browser-access": "true"
         },
-        body: JSON.stringify(options)
+        body: JSON.stringify(options),
+        // Since we can't make direct calls due to CORS, we'll rely on the proxy
+        mode: 'cors',
+        credentials: 'omit'
       });
       
       // Store raw response for debugging
@@ -42,11 +47,17 @@ export class ApiService {
       console.log("Full Claude API response:", responseText);
       
       if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
+        const errorMsg = `API error: ${response.status}`;
+        console.error(errorMsg, responseText);
+        throw new Error(errorMsg);
       }
       
       // Check if the response is HTML
-      if (responseText.trim().startsWith('<!DOCTYPE') || responseText.trim().startsWith('<html')) {
+      if (responseText.trim().startsWith('<!DOCTYPE') || 
+          responseText.trim().startsWith('<html') ||
+          responseText.includes('<head>') || 
+          responseText.includes('<body>')) {
+        console.error("Received HTML instead of JSON:", responseText.substring(0, 200));
         throw new Error('Received HTML instead of JSON');
       }
       
@@ -81,11 +92,14 @@ export class ApiService {
           "Content-Type": "application/json",
           "x-api-key": apiKey,
           "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
           "Cache-Control": "no-cache, no-store, must-revalidate",
           "Pragma": "no-cache",
           "Expires": "0"
         },
-        body: JSON.stringify(options)
+        body: JSON.stringify(options),
+        mode: 'cors',
+        credentials: 'same-origin'
       });
       
       // Store raw response for debugging
@@ -96,11 +110,17 @@ export class ApiService {
       console.log("Full proxy response:", responseText);
       
       if (!response.ok) {
-        throw new Error(`Proxy error: ${response.status}`);
+        const errorMsg = `Proxy error: ${response.status}`;
+        console.error(errorMsg, responseText);
+        throw new Error(errorMsg);
       }
       
       // Check if the response is HTML
-      if (responseText.trim().startsWith('<!DOCTYPE') || responseText.trim().startsWith('<html')) {
+      if (responseText.trim().startsWith('<!DOCTYPE') || 
+          responseText.trim().startsWith('<html') ||
+          responseText.includes('<head>') || 
+          responseText.includes('<body>')) {
+        console.error("Received HTML instead of JSON from proxy:", responseText.substring(0, 200));
         throw new Error('Received HTML instead of JSON');
       }
       
@@ -123,13 +143,12 @@ export class ApiService {
     options: ClaudeRequestOptions
   ): Promise<any> {
     try {
-      // First try direct API
-      return await this.callClaudeApi(apiKey, options);
-    } catch (error) {
-      console.log("Direct API call failed, falling back to proxy:", error);
-      
-      // Then try proxy
+      // Try proxy first since direct will fail with CORS
       return await this.callClaudeApiViaProxy(apiKey, options);
+    } catch (error) {
+      console.log("Proxy call failed, trying direct API (though likely to fail due to CORS):", error);
+      // Then try direct API as fallback
+      return await this.callClaudeApi(apiKey, options);
     }
   }
   
