@@ -16,17 +16,13 @@ app.use((req, res, next) => {
   next();
 });
 
-// CORS middleware for all requests - make sure to add proper headers
+// CORS middleware for all requests
 app.use((req, res, next) => {
-  // Allow any origin instead of specific ones
+  // Set CORS headers for all responses
   res.header('Access-Control-Allow-Origin', '*');
-  // Allow more HTTP methods
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  // Allow all headers that Claude API requires
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, x-api-key, anthropic-version, anthropic-dangerous-direct-browser-access, Authorization');
-  // Allow credentials
   res.header('Access-Control-Allow-Credentials', 'true');
-  // Increase max age for preflight requests
   res.header('Access-Control-Max-Age', '86400');
   
   // Handle preflight OPTIONS request
@@ -91,15 +87,16 @@ app.use('/api/claude', createProxyMiddleware({
     console.log('Claude API response status:', proxyRes.statusCode);
     console.log('Claude API response headers:', proxyRes.headers);
     
-    // Add comprehensive CORS headers to response
-    proxyRes.headers['Access-Control-Allow-Origin'] = '*';
-    proxyRes.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
-    proxyRes.headers['Access-Control-Allow-Headers'] = 'Origin, X-Requested-With, Content-Type, Accept, x-api-key, anthropic-version, anthropic-dangerous-direct-browser-access, Authorization';
-    proxyRes.headers['Access-Control-Allow-Credentials'] = 'true';
-    proxyRes.headers['Access-Control-Max-Age'] = '86400';
+    // Add CORS headers to response
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, x-api-key, anthropic-version, anthropic-dangerous-direct-browser-access, Authorization');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
     
-    // Log content type for debugging
-    console.log('Response content-type:', proxyRes.headers['content-type']);
+    // Make sure we're returning the right content type
+    if (proxyRes.headers['content-type'] && proxyRes.headers['content-type'].includes('application/json')) {
+      res.setHeader('Content-Type', 'application/json');
+    }
     
     // If the response is HTML instead of JSON, log this information
     if (proxyRes.headers['content-type'] && proxyRes.headers['content-type'].includes('text/html')) {
@@ -119,7 +116,14 @@ app.use('/api/claude', createProxyMiddleware({
   },
   onError: (err, req, res) => {
     console.error('Proxy error in production:', err);
-    res.status(500).json({ error: 'Proxy error', message: err.message });
+    
+    // Respond with JSON error instead of HTML
+    res.setHeader('Content-Type', 'application/json');
+    res.status(500).json({ 
+      error: 'Proxy error', 
+      message: err.message,
+      timestamp: new Date().toISOString()
+    });
   }
 }));
 

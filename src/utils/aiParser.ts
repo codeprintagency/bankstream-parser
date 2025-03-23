@@ -32,6 +32,27 @@ export const getLastHtmlResponse = (): string => {
   return ApiService.getLastRawResponse();
 };
 
+// This function attempts to extract JSON from various formats (including malformed responses)
+function extractJsonFromResponse(responseText: string): any {
+  try {
+    // First try direct JSON parsing
+    return JSON.parse(responseText);
+  } catch (e) {
+    // If that fails, try to extract JSON using regex
+    try {
+      const jsonMatch = responseText.match(/\[\s*\{.*\}\s*\]/s);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0]);
+      }
+    } catch (regexError) {
+      console.error("Failed to extract JSON using regex", regexError);
+    }
+    
+    // If all parsing attempts fail, throw error
+    throw new Error("Could not extract valid JSON from response");
+  }
+}
+
 // Parse transactions using Claude AI via the proxy
 export const parseTransactionsWithAI = async (
   pdfText: string[],
@@ -81,79 +102,30 @@ export const parseTransactionsWithAI = async (
       ]
     };
     
-    try {
-      // Try using the proxy first - this is our primary method
-      console.log("Attempting to call Claude API via proxy...");
-      const data = await ApiService.callClaudeApiViaProxy(apiKey, options);
+    // Call the proxy method - it will automatically fall back to direct API if needed
+    console.log("Attempting to call Claude API via proxy...");
+    const data = await ApiService.callClaudeApiViaProxy(apiKey, options);
+    
+    console.log("Claude response:", data);
+    
+    if (data && data.content && data.content[0] && data.content[0].text) {
+      const content = data.content[0].text;
+      console.log("Claude content:", content.substring(0, 200) + "...");
       
-      console.log("Claude response:", data);
-      
-      if (data && data.content && data.content[0] && data.content[0].text) {
-        const content = data.content[0].text;
-        console.log("Claude content:", content.substring(0, 200) + "...");
-        
-        // Try to parse the content as JSON directly
-        try {
-          const transactions: Transaction[] = JSON.parse(content);
-          console.log(`Parsed ${transactions.length} transactions from Claude response`);
-          return transactions;
-        } catch (jsonError) {
-          // If direct parsing fails, try to extract JSON array using regex
-          const jsonMatch = content.match(/\[\s*\{.*\}\s*\]/s);
-          
-          if (jsonMatch) {
-            const transactions: Transaction[] = JSON.parse(jsonMatch[0]);
-            console.log(`Parsed ${transactions.length} transactions using regex extraction`);
-            return transactions;
-          }
-          
-          // If all parsing attempts fail
-          console.error('Could not parse JSON in Claude response', jsonError);
-          console.error('Claude response content:', content);
-          
-          throw new Error('Failed to parse JSON from Claude response');
-        }
-      } else {
-        console.error('Invalid Claude response structure:', data);
-        throw new Error('Invalid Claude response structure');
-      }
-    } catch (proxyError: any) {
-      console.error("Proxy request failed:", proxyError);
-      
-      // If we get a CORS error or HTML response from the proxy, try direct API with no-cors mode
-      // Note: no-cors returns an opaque response we can't read, but we're trying as a last resort
+      // Try to parse the content as JSON or extract JSON from it
       try {
-        console.log("Proxy failed, attempting direct API call with no-cors...");
-        const directData = await ApiService.callClaudeApi(apiKey, options);
+        const transactions: Transaction[] = extractJsonFromResponse(content);
+        console.log(`Parsed ${transactions.length} transactions from Claude response`);
+        return transactions;
+      } catch (jsonError) {
+        console.error('Could not parse JSON in Claude response', jsonError);
+        console.error('Claude response content:', content);
         
-        if (directData && directData._opaque_response) {
-          // We need to inform the user that no-cors mode was used, which doesn't return usable data
-          throw new Error('Direct API call used no-cors mode, which returns an opaque response. API access requires a server-side proxy. Try using a different network or hosting environment.');
-        }
-        
-      } catch (directError: any) {
-        console.error("Direct API request also failed:", directError);
-        // Combine errors for better debugging
-        throw new Error(`API request failed: ${proxyError.message} (and direct API call failed: ${directError.message})`);
+        throw new Error('Failed to parse JSON from Claude response');
       }
-      
-      // Detailed error message for HTML responses from the proxy
-      if (proxyError.message && proxyError.message.includes('HTML')) {
-        throw new Error('Received HTML instead of JSON. The server is likely returning an error page or CORS issue. Check the debug modal for details.');
-      }
-      
-      // If we got a CORS error
-      if (proxyError.message && proxyError.message.includes('CORS')) {
-        throw new Error('CORS policy prevented API access. The browser blocked the request for security reasons. Try using the proxy server instead.');
-      }
-
-      // If it's a network error (e.g., Failed to fetch)
-      if (proxyError.name === 'TypeError' && proxyError.message.includes('fetch')) {
-        throw new Error('Network error: Could not connect to the API. This may be due to CORS restrictions or network connectivity issues.');
-      }
-      
-      // Generic error
-      throw new Error(`Error calling Claude API: ${proxyError.message || 'Unknown error'}`);
+    } else {
+      console.error('Invalid Claude response structure:', data);
+      throw new Error('Invalid Claude response structure');
     }
   } catch (error: any) {
     console.error('Error parsing with AI:', error);

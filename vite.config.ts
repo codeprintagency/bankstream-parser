@@ -85,27 +85,29 @@ export default defineConfig(({ mode }) => ({
               // We want to collect the response to log it for debugging
               let responseBody = '';
               
-              // Safely override write and end methods without TypeScript errors
-              const originalWrite = res.write;
-              const originalEnd = res.end;
+              // Override write and end methods in a TypeScript-safe way
+              const originalWrite = res.write.bind(res);
+              const originalEnd = res.end.bind(res);
               
-              // Create a type-safe override for the write method
-              res.write = function(chunk, encoding, callback) {
+              // Safe override for write
+              res.write = function(chunk, encoding?, callback?) {
                 if (chunk) {
                   responseBody += typeof chunk === 'string' ? chunk : chunk.toString();
                 }
-                return originalWrite.call(res, chunk, encoding, callback);
+                // Call with original arguments
+                return originalWrite(chunk, encoding, callback);
               };
               
-              // Create a type-safe override for the end method
-              res.end = function(chunk, encoding, callback) {
+              // Safe override for end
+              res.end = function(chunk?, encoding?, callback?) {
                 if (chunk) {
                   responseBody += typeof chunk === 'string' ? chunk : chunk.toString();
                 }
                 
                 console.log('HTML response preview:', responseBody.substring(0, 1000) + '...');
                 
-                return originalEnd.call(res, chunk, encoding, callback);
+                // Call with original arguments
+                return originalEnd(chunk, encoding, callback);
               };
             }
           });
