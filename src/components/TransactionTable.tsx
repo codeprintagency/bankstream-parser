@@ -38,7 +38,7 @@ const TransactionTable: React.FC<TransactionTableProps> = ({ transactions }) => 
           {transactions.map((transaction, index) => (
             <TableRow key={index}>
               <TableCell>{transaction.date}</TableCell>
-              <TableCell className="max-w-[300px] truncate">
+              <TableCell className="max-w-[300px] truncate" title={transaction.description}>
                 {transaction.description}
               </TableCell>
               <TableCell>{transaction.category}</TableCell>
