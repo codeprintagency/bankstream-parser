@@ -9,6 +9,17 @@ export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
     port: 8080,
+    proxy: {
+      // Proxy API requests to avoid CORS issues
+      '/api/claude': {
+        target: 'https://api.anthropic.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/claude/, ''),
+        headers: {
+          'Origin': 'https://api.anthropic.com'
+        }
+      }
+    }
   },
   build: {
     outDir: "dist"
@@ -24,4 +35,3 @@ export default defineConfig(({ mode }) => ({
     },
   },
 }));
-
