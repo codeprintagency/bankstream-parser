@@ -55,15 +55,18 @@ export const parseTransactionsWithAI = async (
     `;
 
     console.log("Sending request to Claude through proxy with prompt length:", prompt.length);
-
-    // Make the request to Claude AI API through our proxy
-    const response = await fetch('/api/claude/v1/messages', {
+    
+    // Make the request directly to Claude AI API (no proxy)
+    const apiUrl = '/api/claude/v1/messages';
+    console.log(`Making request to: ${apiUrl}`);
+    
+    const requestOptions = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true' // Add this required header for browser requests
+        'anthropic-dangerous-direct-browser-access': 'true'
       },
       body: JSON.stringify({
         model: 'claude-3-haiku-20240307',
@@ -75,40 +78,67 @@ export const parseTransactionsWithAI = async (
           }
         ]
       })
-    });
-
+    };
+    
+    console.log("Request headers:", JSON.stringify(requestOptions.headers));
+    
+    const response = await fetch(apiUrl, requestOptions);
+    
     if (!response.ok) {
-      const errorData = await response.json();
-      console.error('Claude API error:', errorData);
-      throw new Error(`Claude API error: ${response.status}`);
+      const errorText = await response.text();
+      console.error('Claude API error status:', response.status);
+      console.error('Claude API error response:', errorText);
+      throw new Error(`Claude API error: ${response.status} - ${errorText}`);
     }
-
-    const data = await response.json();
-    console.log("Claude response received:", data);
     
-    // Extract the content from Claude's response
-    const content = data.content[0].text;
-    console.log("Claude content:", content.substring(0, 200) + "...");
+    // Log the raw response for debugging
+    const responseText = await response.text();
+    console.log("Raw API response:", responseText.substring(0, 500) + "...");
     
-    // Find the JSON array in the response
-    const jsonMatch = content.match(/\[\s*\{.*\}\s*\]/s);
-    
-    if (jsonMatch) {
-      // Parse the JSON data
-      const transactions: Transaction[] = JSON.parse(jsonMatch[0]);
-      console.log(`Parsed ${transactions.length} transactions from Claude response`);
-      return transactions;
-    } else {
-      // Try to parse the entire response as JSON if it doesn't match the pattern
-      try {
-        const transactions: Transaction[] = JSON.parse(content);
-        console.log(`Parsed ${transactions.length} transactions from full Claude response`);
-        return transactions;
-      } catch (jsonError) {
-        console.error('Could not parse JSON in Claude response', jsonError);
-        console.error('Claude response content:', content);
-        throw new Error('Failed to parse JSON from Claude response');
+    try {
+      // Try to parse the response as JSON
+      const data = JSON.parse(responseText);
+      console.log("Claude response parsed as JSON:", data);
+      
+      // Extract the content from Claude's response
+      if (data && data.content && data.content[0] && data.content[0].text) {
+        const content = data.content[0].text;
+        console.log("Claude content:", content.substring(0, 200) + "...");
+        
+        // Find the JSON array in the response
+        const jsonMatch = content.match(/\[\s*\{.*\}\s*\]/s);
+        
+        if (jsonMatch) {
+          // Parse the JSON data
+          const transactions: Transaction[] = JSON.parse(jsonMatch[0]);
+          console.log(`Parsed ${transactions.length} transactions from Claude response`);
+          return transactions;
+        } else {
+          // Try to parse the entire content as JSON if it doesn't match the pattern
+          try {
+            const transactions: Transaction[] = JSON.parse(content);
+            console.log(`Parsed ${transactions.length} transactions from full Claude response`);
+            return transactions;
+          } catch (jsonError) {
+            console.error('Could not parse JSON in Claude response', jsonError);
+            console.error('Claude response content:', content);
+            throw new Error('Failed to parse JSON from Claude response');
+          }
+        }
+      } else {
+        console.error('Invalid Claude response structure:', data);
+        throw new Error('Invalid Claude response structure');
       }
+    } catch (jsonError) {
+      console.error('Error parsing Claude API response as JSON:', jsonError);
+      console.error('Response was:', responseText.substring(0, 1000) + '...');
+      
+      // Check if the response looks like HTML
+      if (responseText.trim().startsWith('<!DOCTYPE') || responseText.trim().startsWith('<html')) {
+        throw new Error('Received HTML instead of JSON. The proxy configuration may be incorrect.');
+      }
+      
+      throw new Error(`Failed to parse Claude response: ${jsonError.message}`);
     }
   } catch (error) {
     console.error('Error parsing with AI:', error);
