@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
@@ -102,7 +101,7 @@ const FileUpload: React.FC = () => {
   }, [transactions, toast]);
 
   return (
-    <section className="container mx-auto px-4 md:px-8 py-16 md:py-24">
+    <section id="file-upload-section" className="container mx-auto px-4 md:px-8 py-16 md:py-24">
       <div className="max-w-4xl mx-auto">
         <div
           className={`

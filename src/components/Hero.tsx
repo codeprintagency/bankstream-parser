@@ -3,6 +3,13 @@ import React from "react";
 import { Button } from "@/components/ui/button";
 
 const Hero: React.FC = () => {
+  const scrollToFileUpload = () => {
+    const fileUploadElement = document.getElementById("file-upload-section");
+    if (fileUploadElement) {
+      fileUploadElement.scrollIntoView({ behavior: "smooth" });
+    }
+  };
+
   return (
     <section className="container mx-auto px-4 md:px-8 pt-16 md:pt-20 pb-24 md:pb-32">
       <div className="flex flex-col items-center text-center max-w-4xl mx-auto animate-fade-in">
@@ -17,7 +24,11 @@ const Hero: React.FC = () => {
           organized Excel files. No technical skills required.
         </p>
         <div className="flex flex-col sm:flex-row gap-4">
-          <Button size="lg" className="rounded-full px-8 py-6 animate-pulse-soft">
+          <Button 
+            size="lg" 
+            className="rounded-full px-8 py-6 animate-pulse-soft"
+            onClick={scrollToFileUpload}
+          >
             Start Converting
           </Button>
           <Button 
