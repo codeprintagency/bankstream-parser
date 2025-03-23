@@ -91,17 +91,38 @@ const FileUpload: React.FC = () => {
           return;
         }
         
+        // Open dialog to get API key if none is provided and premium is enabled
+        if (!apiKey && isPremium) {
+          setApiKeyDialogOpen(true);
+          setIsConverting(false);
+          return;
+        }
+        
         // Extract text from PDF for AI processing
         const extractedText = await extractTextFromPdf(file);
         
-        // Use AI parsing (with default API key if none provided)
-        const aiExtractedTransactions = await parseTransactionsWithAI(extractedText, apiKey || undefined);
-        setTransactions(aiExtractedTransactions);
-        
-        toast({
-          title: "AI Conversion Successful",
-          description: `${aiExtractedTransactions.length} transactions have been extracted by Claude AI`,
-        });
+        try {
+          // Use AI parsing (with default API key if none provided)
+          const aiExtractedTransactions = await parseTransactionsWithAI(extractedText, apiKey || undefined);
+          setTransactions(aiExtractedTransactions);
+          
+          toast({
+            title: "AI Conversion Successful",
+            description: `${aiExtractedTransactions.length} transactions have been extracted from your statement`,
+          });
+        } catch (aiError) {
+          console.error("AI parsing failed:", aiError);
+          
+          // Fallback to traditional parsing if AI fails
+          toast({
+            title: "AI Parsing Failed",
+            description: "Falling back to standard parsing method",
+            variant: "destructive",
+          });
+          
+          const extractedTransactions = await convertPdfToExcel(file);
+          setTransactions(extractedTransactions);
+        }
       } else {
         // Use traditional parsing
         const extractedTransactions = await convertPdfToExcel(file);

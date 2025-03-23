@@ -15,43 +15,63 @@ export default defineConfig(({ mode }) => ({
         target: 'https://api.anthropic.com',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/claude/, ''),
-        headers: {
-          'Origin': 'https://api.anthropic.com'
-        },
+        secure: true,
         configure: (proxy, _options) => {
           proxy.on('error', (err, _req, _res) => {
             console.error('Proxy error:', err);
           });
           
           proxy.on('proxyReq', (proxyReq, req, _res) => {
-            // Pass through all the headers as-is
-            const headerNames = Object.keys(req.headers);
+            console.log('Proxying request to Claude API with method:', req.method);
             
-            // Log all headers for debugging
-            console.log('Proxying request with headers:', JSON.stringify(headerNames));
+            // Copy all original request headers to the proxy request
+            Object.keys(req.headers).forEach(key => {
+              if (key !== 'host') { // Skip the host header
+                proxyReq.setHeader(key, req.headers[key]);
+                console.log(`Setting header: ${key}`);
+              }
+            });
             
-            // Explicitly pass the dangerous-direct-browser-access header
-            if (req.headers['anthropic-dangerous-direct-browser-access']) {
-              proxyReq.setHeader('anthropic-dangerous-direct-browser-access', req.headers['anthropic-dangerous-direct-browser-access']);
-              console.log('Setting anthropic-dangerous-direct-browser-access header');
-            }
-            
-            // Explicitly pass the API key header
+            // Explicitly pass important headers
             if (req.headers['x-api-key']) {
               proxyReq.setHeader('x-api-key', req.headers['x-api-key']);
-              console.log('Setting x-api-key header');
             }
             
-            // Explicitly pass the anthropic-version header
             if (req.headers['anthropic-version']) {
               proxyReq.setHeader('anthropic-version', req.headers['anthropic-version']);
-              console.log('Setting anthropic-version header');
+            }
+            
+            if (req.headers['anthropic-dangerous-direct-browser-access']) {
+              proxyReq.setHeader('anthropic-dangerous-direct-browser-access', req.headers['anthropic-dangerous-direct-browser-access']);
+            }
+            
+            if (req.headers['content-type']) {
+              proxyReq.setHeader('content-type', req.headers['content-type']);
+            }
+            
+            // Log the request body if it exists
+            if (req.body) {
+              console.log('Request body:', JSON.stringify(req.body).substring(0, 500) + '...');
             }
           });
           
-          proxy.on('proxyRes', (proxyRes, req, _res) => {
-            console.log('Received proxy response with status:', proxyRes.statusCode);
-            console.log('Proxy response headers:', JSON.stringify(Object.keys(proxyRes.headers)));
+          proxy.on('proxyRes', (proxyRes, req, res) => {
+            console.log(`Proxy response status: ${proxyRes.statusCode}`);
+            
+            // Add CORS headers to response
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+            res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-api-key, anthropic-version, anthropic-dangerous-direct-browser-access');
+            
+            // Handle preflight OPTIONS request
+            if (req.method === 'OPTIONS') {
+              res.statusCode = 200;
+              res.end();
+              return;
+            }
+            
+            // Log response headers for debugging
+            console.log('Response headers:', JSON.stringify(Object.keys(proxyRes.headers)));
           });
         }
       }
