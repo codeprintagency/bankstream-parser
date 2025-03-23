@@ -17,6 +17,14 @@ export default defineConfig(({ mode }) => ({
         rewrite: (path) => path.replace(/^\/api\/claude/, ''),
         headers: {
           'Origin': 'https://api.anthropic.com'
+        },
+        configure: (proxy, _options) => {
+          proxy.on('proxyReq', (proxyReq, req, _res) => {
+            // Pass through the dangerous-direct-browser-access header
+            if (req.headers['anthropic-dangerous-direct-browser-access']) {
+              proxyReq.setHeader('anthropic-dangerous-direct-browser-access', req.headers['anthropic-dangerous-direct-browser-access']);
+            }
+          });
         }
       }
     }
