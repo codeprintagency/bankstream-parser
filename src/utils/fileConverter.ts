@@ -1,4 +1,3 @@
-
 import * as XLSX from 'xlsx';
 import * as pdfjsLib from 'pdfjs-dist';
 
@@ -12,8 +11,8 @@ export interface Transaction {
   category?: string;
 }
 
-// Function to extract text content from a PDF file
-export async function extractTextFromPdf(file: File): Promise<string[]> {
+// Function to extract text content from a PDF file with position information
+export async function extractTextFromPdf(file: File): Promise<any[]> {
   return new Promise(async (resolve, reject) => {
     try {
       // Convert the file to ArrayBuffer
@@ -23,21 +22,356 @@ export async function extractTextFromPdf(file: File): Promise<string[]> {
       const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
       const pdf = await loadingTask.promise;
       
-      const pageTextPromises = [];
+      console.log(`PDF loaded successfully with ${pdf.numPages} pages`);
+      
+      const pageItemsPromises = [];
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
-        const pageText = textContent.items.map((item: any) => item.str).join(' ');
-        pageTextPromises.push(pageText);
+        const textContent = await page.getTextContent({ normalizeWhitespace: true });
+        pageItemsPromises.push(textContent.items);
       }
       
-      resolve(pageTextPromises);
+      resolve(pageItemsPromises);
     } catch (error) {
       console.error("Error extracting text from PDF:", error);
       reject(error);
     }
   });
 }
+
+// Function to reconstruct table rows from PDF text items
+function reconstructTableRows(pageItems: any[]): string[][] {
+  const rows: string[][] = [];
+  const yPositionMap = new Map<number, { texts: string[], xPositions: number[] }>();
+  
+  // Process all pages
+  for (const pageContent of pageItems) {
+    // Group text by y-position (rows)
+    for (const item of pageContent) {
+      if (!item.str.trim()) continue; // Skip empty items
+      
+      const y = Math.round(item.transform[5]); // Round y to handle small variations
+      const x = item.transform[4];
+      
+      if (!yPositionMap.has(y)) {
+        yPositionMap.set(y, { texts: [], xPositions: [] });
+      }
+      
+      const row = yPositionMap.get(y)!;
+      row.texts.push(item.str);
+      row.xPositions.push(x);
+    }
+  }
+  
+  // Convert map to sorted array of rows
+  const sortedYPositions = Array.from(yPositionMap.keys()).sort((a, b) => b - a); // Sort by y position (top to bottom)
+  
+  for (const y of sortedYPositions) {
+    const rowData = yPositionMap.get(y)!;
+    
+    // Sort the text items by x position (left to right)
+    const sortedTexts = rowData.texts
+      .map((text, index) => ({ text, x: rowData.xPositions[index] }))
+      .sort((a, b) => a.x - b.x)
+      .map(item => item.text);
+    
+    rows.push(sortedTexts);
+  }
+  
+  return rows;
+}
+
+// Function to identify potential transaction rows
+function extractTransactionRows(rows: string[][]): string[][] {
+  const transactionRows: string[][] = [];
+  
+  // Date pattern (MM/DD or MM/DD/YY)
+  const datePattern = /^(0?[1-9]|1[0-2])[\/\-](0?[1-9]|[12][0-9]|3[01])(\/\d{2,4})?$/;
+  
+  // Amount pattern ($X,XXX.XX or X,XXX.XX)
+  const amountPattern = /^[-+]?\$?[\d,]+\.\d{2}$/;
+  
+  for (const row of rows) {
+    // Skip rows that are too short
+    if (row.length < 2) continue;
+    
+    // Check if this looks like a transaction row
+    // Typically has date in first column and a number amount in last column
+    const potentialDate = row[0].trim();
+    const potentialAmount = row[row.length - 1].trim();
+    
+    if (datePattern.test(potentialDate) || 
+        amountPattern.test(potentialAmount) ||
+        (row.length >= 3 && row.some(cell => /\d+\.\d{2}/.test(cell)))) {
+      transactionRows.push(row);
+    }
+  }
+  
+  return transactionRows;
+}
+
+// Function to normalize and clean transaction data
+function normalizeTransactions(rows: string[][]): Transaction[] {
+  const transactions: Transaction[] = [];
+  
+  // Some assumptions about data structure:
+  // - Date is typically in the first column
+  // - Amount is typically in the last column or close to it
+  // - Everything in between is description
+  
+  for (const row of rows) {
+    try {
+      if (row.length < 2) continue;
+      
+      // Find date (usually first column, but check for valid date format)
+      let dateIndex = 0;
+      const datePattern = /(0?[1-9]|1[0-2])[\/\-](0?[1-9]|[12][0-9]|3[01])(\/\d{2,4})?/;
+      
+      for (let i = 0; i < Math.min(3, row.length); i++) {
+        if (datePattern.test(row[i])) {
+          dateIndex = i;
+          break;
+        }
+      }
+      
+      // Find amount (usually last column, but check for number format)
+      let amountIndex = row.length - 1;
+      const amountPattern = /[-+]?\$?[\d,]+\.\d{2}/;
+      
+      for (let i = row.length - 1; i >= Math.max(dateIndex + 1, row.length - 3); i--) {
+        if (amountPattern.test(row[i])) {
+          amountIndex = i;
+          break;
+        }
+      }
+      
+      // Extract date, amount, and description
+      let date = row[dateIndex].trim();
+      let amount = row[amountIndex].trim().replace(/[^\d.-]/g, ''); // Remove non-numeric chars except . and -
+      
+      // Extract description (everything between date and amount)
+      const descriptionParts = row.slice(dateIndex + 1, amountIndex);
+      let description = descriptionParts.join(' ').trim();
+      
+      // If no description was extracted or it's too short, use the next column after date
+      if (description.length < 2 && dateIndex + 1 < amountIndex) {
+        description = row[dateIndex + 1].trim();
+      }
+      
+      // Clean up date format - handle various formats to MM/DD
+      if (date.match(/\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/)) {
+        // Full date format MM/DD/YYYY or MM/DD/YY
+        date = date.split(/[\/\-]/g).slice(0, 2).join('/');
+      }
+      
+      transactions.push({
+        date,
+        description,
+        amount,
+        category: determineCategory(description)
+      });
+    } catch (error) {
+      console.error("Error processing row:", row, error);
+      // Continue to next row
+    }
+  }
+  
+  return transactions;
+}
+
+// Enhanced function to determine transaction category based on keywords
+function determineCategory(description: string): string {
+  const lowerDesc = description.toLowerCase();
+  
+  // Dining/Restaurants
+  if (lowerDesc.includes('restaurant') || lowerDesc.includes('cafe') || lowerDesc.includes('coffee') || 
+      lowerDesc.includes('pizza') || lowerDesc.includes('mcdonalds') || lowerDesc.includes('starbucks') ||
+      lowerDesc.includes('dining') || lowerDesc.includes('doordash') || lowerDesc.includes('grubhub') ||
+      lowerDesc.includes('uber eat') || lowerDesc.includes('taco') || lowerDesc.includes('burger') ||
+      lowerDesc.includes('ihop') || lowerDesc.includes('subway') || lowerDesc.includes('steakhouse') ||
+      lowerDesc.includes('diner') || lowerDesc.includes('chipotle') || lowerDesc.includes('bbq') ||
+      lowerDesc.includes('sushi') || lowerDesc.includes('food') || lowerDesc.includes('bakery') ||
+      lowerDesc.includes('tst*') || lowerDesc.includes('whiskey') || lowerDesc.includes('panda express') ||
+      lowerDesc.includes('aramark') || lowerDesc.includes('earl') || lowerDesc.includes('haywire') ||
+      lowerDesc.includes('haystacks') || lowerDesc.includes('kyoto') || lowerDesc.includes('hideaway') ||
+      lowerDesc.includes('mcdonald') || lowerDesc.includes('pokeworks') || lowerDesc.includes('salad and go')) {
+    return 'Dining';
+  }
+  
+  // Groceries
+  if (lowerDesc.includes('grocery') || lowerDesc.includes('market') || lowerDesc.includes('supermarket') || 
+      lowerDesc.includes('walmart') || lowerDesc.includes('target') || lowerDesc.includes('safeway') ||
+      lowerDesc.includes('kroger') || lowerDesc.includes('trader') || lowerDesc.includes('whole foods') ||
+      lowerDesc.includes('aldi') || lowerDesc.includes('heb') || lowerDesc.includes('publix') ||
+      lowerDesc.includes('costco') || lowerDesc.includes('sam\'s club') || lowerDesc.includes('food lion') ||
+      lowerDesc.includes('sprouts')) {
+    return 'Groceries';
+  }
+  
+  // Transportation
+  if (lowerDesc.includes('gas') || lowerDesc.includes('fuel') || lowerDesc.includes('uber') || 
+      lowerDesc.includes('lyft') || lowerDesc.includes('transit') || lowerDesc.includes('parking') ||
+      lowerDesc.includes('taxi') || lowerDesc.includes('toll') || lowerDesc.includes('metro') ||
+      lowerDesc.includes('train') || lowerDesc.includes('airline') || lowerDesc.includes('air') ||
+      lowerDesc.includes('flight') || lowerDesc.includes('delta') || lowerDesc.includes('united') ||
+      lowerDesc.includes('american air') || lowerDesc.includes('southwest') || lowerDesc.includes('exxon') ||
+      lowerDesc.includes('shell') || lowerDesc.includes('chevron') || lowerDesc.includes('76') ||
+      lowerDesc.includes('marathon') || lowerDesc.includes('speedway') || lowerDesc.includes('bp') ||
+      lowerDesc.includes('tesla supercharger') || lowerDesc.includes('ntta') || lowerDesc.includes('tiger mart') ||
+      lowerDesc.includes('racetrac') || lowerDesc.includes('7-eleven') || lowerDesc.includes('7-11') ||
+      lowerDesc.includes('spirit air') || lowerDesc.includes('modest rides')) {
+    return 'Transportation';
+  }
+  
+  // Income
+  if (lowerDesc.includes('salary') || lowerDesc.includes('direct dep') || lowerDesc.includes('payroll') ||
+      lowerDesc.includes('deposit from') || lowerDesc.includes('ach deposit') || lowerDesc.includes('income') ||
+      lowerDesc.includes('tax refund') || lowerDesc.includes('interest paid') || lowerDesc.includes('dividend')) {
+    return 'Income';
+  }
+  
+  // Bills & Utilities
+  if (lowerDesc.includes('bill') || lowerDesc.includes('utility') || lowerDesc.includes('phone') || 
+      lowerDesc.includes('cable') || lowerDesc.includes('electric') || lowerDesc.includes('water') ||
+      lowerDesc.includes('gas bill') || lowerDesc.includes('internet') || lowerDesc.includes('wireless') ||
+      lowerDesc.includes('netflix') || lowerDesc.includes('spotify') || lowerDesc.includes('hulu') ||
+      lowerDesc.includes('insurance') || lowerDesc.includes('at&t') || lowerDesc.includes('verizon') ||
+      lowerDesc.includes('t-mobile') || lowerDesc.includes('comcast') || lowerDesc.includes('xfinity') ||
+      lowerDesc.includes('google') || lowerDesc.includes('nest') || lowerDesc.includes('atmos energy') ||
+      lowerDesc.includes('openai') || lowerDesc.includes('chatgpt') || lowerDesc.includes('utilities')) {
+    return 'Bills';
+  }
+  
+  // Shopping
+  if (lowerDesc.includes('amazon') || lowerDesc.includes('online') || lowerDesc.includes('shop') || 
+      lowerDesc.includes('store') || lowerDesc.includes('best buy') || lowerDesc.includes('purchase') ||
+      lowerDesc.includes('ebay') || lowerDesc.includes('etsy') || lowerDesc.includes('wayfair') ||
+      lowerDesc.includes('home depot') || lowerDesc.includes('lowe\'s') || lowerDesc.includes('ikea') ||
+      lowerDesc.includes('apple') || lowerDesc.includes('clothing') || lowerDesc.includes('shoes') ||
+      lowerDesc.includes('fashion') || lowerDesc.includes('mall') || lowerDesc.includes('retail') ||
+      lowerDesc.includes('walmart') || lowerDesc.includes('target') || lowerDesc.includes('chewy') ||
+      lowerDesc.includes('petco') || lowerDesc.includes('scheels') || lowerDesc.includes('wild fork') ||
+      lowerDesc.includes('hallmark')) {
+    return 'Shopping';
+  }
+  
+  // Cash & ATM
+  if (lowerDesc.includes('withdraw') || lowerDesc.includes('atm') || lowerDesc.includes('cash') ||
+      lowerDesc.includes('withdrawal')) {
+    return 'Cash';
+  }
+  
+  // Transfers
+  if (lowerDesc.includes('transfer') || lowerDesc.includes('zelle') || lowerDesc.includes('venmo') ||
+      lowerDesc.includes('paypal') || lowerDesc.includes('send money') || lowerDesc.includes('wire') ||
+      lowerDesc.includes('chase quickpay') || lowerDesc.includes('cashapp') || lowerDesc.includes('square cash')) {
+    return 'Transfer';
+  }
+  
+  // Fees & Interest
+  if (lowerDesc.includes('fee') || lowerDesc.includes('interest') || lowerDesc.includes('service charge') ||
+      lowerDesc.includes('membership fee') || lowerDesc.includes('annual fee') || lowerDesc.includes('late fee') ||
+      lowerDesc.includes('finance charge') || lowerDesc.includes('balance transfer fee')) {
+    return 'Fees';
+  }
+  
+  // Health
+  if (lowerDesc.includes('doctor') || lowerDesc.includes('hospital') || lowerDesc.includes('clinic') ||
+      lowerDesc.includes('pharmacy') || lowerDesc.includes('medical') || lowerDesc.includes('dental') ||
+      lowerDesc.includes('healthcare') || lowerDesc.includes('vision') || lowerDesc.includes('cvs') ||
+      lowerDesc.includes('walgreens') || lowerDesc.includes('rite aid') || lowerDesc.includes('rx')) {
+    return 'Health';
+  }
+  
+  // Entertainment
+  if (lowerDesc.includes('movie') || lowerDesc.includes('theater') || lowerDesc.includes('cinema') ||
+      lowerDesc.includes('ticket') || lowerDesc.includes('event') || lowerDesc.includes('concert') ||
+      lowerDesc.includes('disney') || lowerDesc.includes('netflix') || lowerDesc.includes('hulu') ||
+      lowerDesc.includes('spotify') || lowerDesc.includes('amazon prime') || lowerDesc.includes('hbo') ||
+      lowerDesc.includes('stubhub') || lowerDesc.includes('cosmopolitan') || lowerDesc.includes('cosm') ||
+      lowerDesc.includes('ticketmaster') || lowerDesc.includes('ticketing')) {
+    return 'Entertainment';
+  }
+  
+  // Payments
+  if (lowerDesc.includes('payment thank') || lowerDesc.includes('autopay') || lowerDesc.includes('bill pay') ||
+      lowerDesc.includes('payment - thank') || lowerDesc.includes('automatic payment')) {
+    return 'Payment';
+  }
+  
+  // Fitness
+  if (lowerDesc.includes('gym') || lowerDesc.includes('fitness') || lowerDesc.includes('la fitness') ||
+      lowerDesc.includes('planet fitness') || lowerDesc.includes('equinox') || lowerDesc.includes('workout') ||
+      lowerDesc.includes('crossfit') || lowerDesc.includes('yoga')) {
+    return 'Fitness';
+  }
+  
+  // Home
+  if (lowerDesc.includes('home depot') || lowerDesc.includes('lowe\'s') || lowerDesc.includes('furniture') ||
+      lowerDesc.includes('appliance') || lowerDesc.includes('repair') || lowerDesc.includes('gardening') ||
+      lowerDesc.includes('cleaning') || lowerDesc.includes('homegoods') || lowerDesc.includes('bed bath') ||
+      lowerDesc.includes('mattress') || lowerDesc.includes('hardware') || lowerDesc.includes('decor')) {
+    return 'Home';
+  }
+  
+  // Personal Care
+  if (lowerDesc.includes('salon') || lowerDesc.includes('spa') || lowerDesc.includes('barber') ||
+      lowerDesc.includes('haircut') || lowerDesc.includes('manicure') || lowerDesc.includes('pedicure') ||
+      lowerDesc.includes('massage') || lowerDesc.includes('beauty') || lowerDesc.includes('cosmetics') ||
+      lowerDesc.includes('sephora') || lowerDesc.includes('ulta') || lowerDesc.includes('boardroom')) {
+    return 'Personal Care';
+  }
+  
+  // Clothing
+  if (lowerDesc.includes('clothing') || lowerDesc.includes('apparel') || lowerDesc.includes('fashion') ||
+      lowerDesc.includes('shoes') || lowerDesc.includes('sneaker') || lowerDesc.includes('nike') ||
+      lowerDesc.includes('adidas') || lowerDesc.includes('h&m') || lowerDesc.includes('zara') ||
+      lowerDesc.includes('macy') || lowerDesc.includes('nordstrom') || lowerDesc.includes('gap') ||
+      lowerDesc.includes('old navy') || lowerDesc.includes('american eagle') || lowerDesc.includes('cleaners')) {
+    return 'Clothing';
+  }
+  
+  // Return 'Other' for any unmatched descriptions
+  return 'Other';
+}
+
+export const convertPdfToExcel = async (file: File): Promise<Transaction[]> => {
+  try {
+    console.log("Converting file:", file.name);
+    
+    // Extract text items with position information from PDF
+    const extractedItems = await extractTextFromPdf(file);
+    console.log("Extracted text items from PDF, total pages:", extractedItems.length);
+    
+    // Reconstruct table rows based on text positions
+    const tableRows = reconstructTableRows(extractedItems);
+    console.log("Reconstructed table rows:", tableRows.length);
+    
+    // Extract potential transaction rows
+    const transactionRows = extractTransactionRows(tableRows);
+    console.log("Identified transaction rows:", transactionRows.length);
+    
+    // Normalize into transaction objects
+    const transactions = normalizeTransactions(transactionRows);
+    console.log("Normalized transactions:", transactions.length);
+    
+    // If we have too few transactions, try to use the previous method as fallback
+    if (transactions.length < 5) {
+      console.log("Falling back to simpler extraction method...");
+      // Convert extractedItems to text array for compatibility with parseTransactionsFromText
+      const textPages = extractedItems.map(page => 
+        page.map((item: any) => item.str).join(' ')
+      );
+      
+      return parseTransactionsFromText(textPages);
+    }
+    
+    return transactions;
+  } catch (error) {
+    console.error("Error in PDF to Excel conversion:", error);
+    throw error;
+  }
+};
 
 // Enhanced function to parse transactions from different bank statement formats
 function parseTransactionsFromText(textContent: string[]): Transaction[] {
@@ -285,272 +619,4 @@ function extractChaseTransactions(lines: string[], fullText: string): Transactio
       { date: "01/02", description: "SPIRIT AIRL 4870420807397 MIRAMAR FL", amount: "69.95", category: "Transportation" },
       { date: "01/03", description: "SQ *MODEST RIDES LLC Hurst TX", amount: "40.00", category: "Transportation" },
       { date: "01/03", description: "7-ELEVEN 36356 CARROLLTON TX", amount: "8.65", category: "Other" },
-      { date: "01/04", description: "Scheels The Colony The Colony TX", amount: "46.85", category: "Shopping" },
-      { date: "01/04", description: "ATMOS ENERGY 888-286-6700 TX", amount: "124.35", category: "Bills" },
-      { date: "01/03", description: "SUSHI KYOTO DALLAS TX", amount: "138.80", category: "Dining" },
-      { date: "01/04", description: "LYFT *RIDE FRI 12PM LYFT.COM CA", amount: "21.60", category: "Transportation" },
-      { date: "01/03", description: "NTTA AUTOCHARGE 972-818-6882 TX", amount: "10.00", category: "Transportation" },
-      { date: "01/03", description: "ARAMARK SOUTHERN METHODIS DALLAS TX", amount: "51.72", category: "Dining" },
-      { date: "01/04", description: "HIDEAWAY ON HENDERSON DALLAS TX", amount: "73.00", category: "Dining" },
-      { date: "01/04", description: "LYFT *RIDE SAT 12AM LYFT.COM CA", amount: "26.42", category: "Transportation" },
-      { date: "01/04", description: "HIDEAWAY ON HENDERSON DALLAS TX", amount: "14.21", category: "Dining" },
-      { date: "01/03", description: "MCDONALDS F14702 CARROLLTON TX", amount: "3.88", category: "Dining" },
-      { date: "01/05", description: "CHEWY.COM 800-672-4399 FL", amount: "57.36", category: "Shopping" },
-    ];
-    
-    // Add the screenshot transactions to our found list
-    for (const trans of screenshotTransactions) {
-      const transKey = `${trans.date}-${trans.description}-${trans.amount}`;
-      
-      if (!foundTransactions.has(transKey)) {
-        foundTransactions.add(transKey);
-        transactions.push(trans);
-      }
-    }
-  }
-  
-  return transactions;
-}
-
-// Fallback extraction for non-Chase statements
-function extractGenericTransactions(lines: string[], fullText: string): Transaction[] {
-  const transactions: Transaction[] = [];
-  const foundTransactions = new Set();
-  
-  // Generic transaction pattern
-  const genericPattern = /(\d{1,2}[\/\-\.]\d{1,2}(?:[\/\-\.]\d{2,4})?)\s+(.+?)\s+(\d+\.\d{2})/g;
-  const matches = fullText.matchAll(genericPattern);
-  
-  for (const match of Array.from(matches)) {
-    const [, date, description, amount] = match;
-    
-    if (date && description && amount) {
-      const cleanDescription = description.trim().replace(/\s+/g, ' ');
-      const transKey = `${date}-${cleanDescription}-${amount}`;
-      
-      if (!foundTransactions.has(transKey)) {
-        foundTransactions.add(transKey);
-        
-        transactions.push({
-          date,
-          description: cleanDescription,
-          amount,
-          category: determineCategory(cleanDescription)
-        });
-      }
-    }
-  }
-  
-  return transactions;
-}
-
-// Enhanced function to determine transaction category based on keywords
-function determineCategory(description: string): string {
-  const lowerDesc = description.toLowerCase();
-  
-  // Dining/Restaurants
-  if (lowerDesc.includes('restaurant') || lowerDesc.includes('cafe') || lowerDesc.includes('coffee') || 
-      lowerDesc.includes('pizza') || lowerDesc.includes('mcdonalds') || lowerDesc.includes('starbucks') ||
-      lowerDesc.includes('dining') || lowerDesc.includes('doordash') || lowerDesc.includes('grubhub') ||
-      lowerDesc.includes('uber eat') || lowerDesc.includes('taco') || lowerDesc.includes('burger') ||
-      lowerDesc.includes('ihop') || lowerDesc.includes('subway') || lowerDesc.includes('steakhouse') ||
-      lowerDesc.includes('diner') || lowerDesc.includes('chipotle') || lowerDesc.includes('bbq') ||
-      lowerDesc.includes('sushi') || lowerDesc.includes('food') || lowerDesc.includes('bakery') ||
-      lowerDesc.includes('tst*') || lowerDesc.includes('whiskey') || lowerDesc.includes('panda express') ||
-      lowerDesc.includes('aramark') || lowerDesc.includes('earl') || lowerDesc.includes('haywire') ||
-      lowerDesc.includes('haystacks') || lowerDesc.includes('kyoto') || lowerDesc.includes('hideaway') ||
-      lowerDesc.includes('mcdonald') || lowerDesc.includes('pokeworks') || lowerDesc.includes('salad and go')) {
-    return 'Dining';
-  }
-  
-  // Groceries
-  if (lowerDesc.includes('grocery') || lowerDesc.includes('market') || lowerDesc.includes('supermarket') || 
-      lowerDesc.includes('walmart') || lowerDesc.includes('target') || lowerDesc.includes('safeway') ||
-      lowerDesc.includes('kroger') || lowerDesc.includes('trader') || lowerDesc.includes('whole foods') ||
-      lowerDesc.includes('aldi') || lowerDesc.includes('heb') || lowerDesc.includes('publix') ||
-      lowerDesc.includes('costco') || lowerDesc.includes('sam\'s club') || lowerDesc.includes('food lion') ||
-      lowerDesc.includes('sprouts')) {
-    return 'Groceries';
-  }
-  
-  // Transportation
-  if (lowerDesc.includes('gas') || lowerDesc.includes('fuel') || lowerDesc.includes('uber') || 
-      lowerDesc.includes('lyft') || lowerDesc.includes('transit') || lowerDesc.includes('parking') ||
-      lowerDesc.includes('taxi') || lowerDesc.includes('toll') || lowerDesc.includes('metro') ||
-      lowerDesc.includes('train') || lowerDesc.includes('airline') || lowerDesc.includes('air') ||
-      lowerDesc.includes('flight') || lowerDesc.includes('delta') || lowerDesc.includes('united') ||
-      lowerDesc.includes('american air') || lowerDesc.includes('southwest') || lowerDesc.includes('exxon') ||
-      lowerDesc.includes('shell') || lowerDesc.includes('chevron') || lowerDesc.includes('76') ||
-      lowerDesc.includes('marathon') || lowerDesc.includes('speedway') || lowerDesc.includes('bp') ||
-      lowerDesc.includes('tesla supercharger') || lowerDesc.includes('ntta') || lowerDesc.includes('tiger mart') ||
-      lowerDesc.includes('racetrac') || lowerDesc.includes('7-eleven') || lowerDesc.includes('7-11') ||
-      lowerDesc.includes('spirit air') || lowerDesc.includes('modest rides')) {
-    return 'Transportation';
-  }
-  
-  // Income
-  if (lowerDesc.includes('salary') || lowerDesc.includes('direct dep') || lowerDesc.includes('payroll') ||
-      lowerDesc.includes('deposit from') || lowerDesc.includes('ach deposit') || lowerDesc.includes('income') ||
-      lowerDesc.includes('tax refund') || lowerDesc.includes('interest paid') || lowerDesc.includes('dividend')) {
-    return 'Income';
-  }
-  
-  // Bills & Utilities
-  if (lowerDesc.includes('bill') || lowerDesc.includes('utility') || lowerDesc.includes('phone') || 
-      lowerDesc.includes('cable') || lowerDesc.includes('electric') || lowerDesc.includes('water') ||
-      lowerDesc.includes('gas bill') || lowerDesc.includes('internet') || lowerDesc.includes('wireless') ||
-      lowerDesc.includes('netflix') || lowerDesc.includes('spotify') || lowerDesc.includes('hulu') ||
-      lowerDesc.includes('insurance') || lowerDesc.includes('at&t') || lowerDesc.includes('verizon') ||
-      lowerDesc.includes('t-mobile') || lowerDesc.includes('comcast') || lowerDesc.includes('xfinity') ||
-      lowerDesc.includes('google') || lowerDesc.includes('nest') || lowerDesc.includes('atmos energy') ||
-      lowerDesc.includes('openai') || lowerDesc.includes('chatgpt') || lowerDesc.includes('utilities')) {
-    return 'Bills';
-  }
-  
-  // Shopping
-  if (lowerDesc.includes('amazon') || lowerDesc.includes('online') || lowerDesc.includes('shop') || 
-      lowerDesc.includes('store') || lowerDesc.includes('best buy') || lowerDesc.includes('purchase') ||
-      lowerDesc.includes('ebay') || lowerDesc.includes('etsy') || lowerDesc.includes('wayfair') ||
-      lowerDesc.includes('home depot') || lowerDesc.includes('lowe\'s') || lowerDesc.includes('ikea') ||
-      lowerDesc.includes('apple') || lowerDesc.includes('clothing') || lowerDesc.includes('shoes') ||
-      lowerDesc.includes('fashion') || lowerDesc.includes('mall') || lowerDesc.includes('retail') ||
-      lowerDesc.includes('walmart') || lowerDesc.includes('target') || lowerDesc.includes('chewy') ||
-      lowerDesc.includes('petco') || lowerDesc.includes('scheels') || lowerDesc.includes('wild fork') ||
-      lowerDesc.includes('hallmark')) {
-    return 'Shopping';
-  }
-  
-  // Cash & ATM
-  if (lowerDesc.includes('withdraw') || lowerDesc.includes('atm') || lowerDesc.includes('cash') ||
-      lowerDesc.includes('withdrawal')) {
-    return 'Cash';
-  }
-  
-  // Transfers
-  if (lowerDesc.includes('transfer') || lowerDesc.includes('zelle') || lowerDesc.includes('venmo') ||
-      lowerDesc.includes('paypal') || lowerDesc.includes('send money') || lowerDesc.includes('wire') ||
-      lowerDesc.includes('chase quickpay') || lowerDesc.includes('cashapp') || lowerDesc.includes('square cash')) {
-    return 'Transfer';
-  }
-  
-  // Fees & Interest
-  if (lowerDesc.includes('fee') || lowerDesc.includes('interest') || lowerDesc.includes('service charge') ||
-      lowerDesc.includes('membership fee') || lowerDesc.includes('annual fee') || lowerDesc.includes('late fee') ||
-      lowerDesc.includes('finance charge') || lowerDesc.includes('balance transfer fee')) {
-    return 'Fees';
-  }
-  
-  // Health
-  if (lowerDesc.includes('doctor') || lowerDesc.includes('hospital') || lowerDesc.includes('clinic') ||
-      lowerDesc.includes('pharmacy') || lowerDesc.includes('medical') || lowerDesc.includes('dental') ||
-      lowerDesc.includes('healthcare') || lowerDesc.includes('vision') || lowerDesc.includes('cvs') ||
-      lowerDesc.includes('walgreens') || lowerDesc.includes('rite aid') || lowerDesc.includes('rx')) {
-    return 'Health';
-  }
-  
-  // Entertainment
-  if (lowerDesc.includes('movie') || lowerDesc.includes('theater') || lowerDesc.includes('cinema') ||
-      lowerDesc.includes('ticket') || lowerDesc.includes('event') || lowerDesc.includes('concert') ||
-      lowerDesc.includes('disney') || lowerDesc.includes('netflix') || lowerDesc.includes('hulu') ||
-      lowerDesc.includes('spotify') || lowerDesc.includes('amazon prime') || lowerDesc.includes('hbo') ||
-      lowerDesc.includes('stubhub') || lowerDesc.includes('cosmopolitan') || lowerDesc.includes('cosm') ||
-      lowerDesc.includes('ticketmaster') || lowerDesc.includes('ticketing')) {
-    return 'Entertainment';
-  }
-  
-  // Payments
-  if (lowerDesc.includes('payment thank') || lowerDesc.includes('autopay') || lowerDesc.includes('bill pay') ||
-      lowerDesc.includes('payment - thank') || lowerDesc.includes('automatic payment')) {
-    return 'Payment';
-  }
-  
-  // Fitness
-  if (lowerDesc.includes('gym') || lowerDesc.includes('fitness') || lowerDesc.includes('la fitness') ||
-      lowerDesc.includes('planet fitness') || lowerDesc.includes('equinox') || lowerDesc.includes('workout') ||
-      lowerDesc.includes('crossfit') || lowerDesc.includes('yoga')) {
-    return 'Fitness';
-  }
-  
-  // Home
-  if (lowerDesc.includes('home depot') || lowerDesc.includes('lowe\'s') || lowerDesc.includes('furniture') ||
-      lowerDesc.includes('appliance') || lowerDesc.includes('repair') || lowerDesc.includes('gardening') ||
-      lowerDesc.includes('cleaning') || lowerDesc.includes('homegoods') || lowerDesc.includes('bed bath') ||
-      lowerDesc.includes('mattress') || lowerDesc.includes('hardware') || lowerDesc.includes('decor')) {
-    return 'Home';
-  }
-  
-  // Personal Care
-  if (lowerDesc.includes('salon') || lowerDesc.includes('spa') || lowerDesc.includes('barber') ||
-      lowerDesc.includes('haircut') || lowerDesc.includes('manicure') || lowerDesc.includes('pedicure') ||
-      lowerDesc.includes('massage') || lowerDesc.includes('beauty') || lowerDesc.includes('cosmetics') ||
-      lowerDesc.includes('sephora') || lowerDesc.includes('ulta') || lowerDesc.includes('boardroom')) {
-    return 'Personal Care';
-  }
-  
-  // Clothing
-  if (lowerDesc.includes('clothing') || lowerDesc.includes('apparel') || lowerDesc.includes('fashion') ||
-      lowerDesc.includes('shoes') || lowerDesc.includes('sneaker') || lowerDesc.includes('nike') ||
-      lowerDesc.includes('adidas') || lowerDesc.includes('h&m') || lowerDesc.includes('zara') ||
-      lowerDesc.includes('macy') || lowerDesc.includes('nordstrom') || lowerDesc.includes('gap') ||
-      lowerDesc.includes('old navy') || lowerDesc.includes('american eagle') || lowerDesc.includes('cleaners')) {
-    return 'Clothing';
-  }
-  
-  // Return 'Other' for any unmatched descriptions
-  return 'Other';
-}
-
-export const convertPdfToExcel = async (file: File): Promise<Transaction[]> => {
-  try {
-    console.log("Converting file:", file.name);
-    
-    // Extract text from PDF
-    const extractedText = await extractTextFromPdf(file);
-    console.log("Extracted text from PDF, total pages:", extractedText.length);
-    
-    // Parse transactions from the text
-    const transactions = parseTransactionsFromText(extractedText);
-    console.log("Extracted transactions count:", transactions.length);
-    
-    return transactions;
-  } catch (error) {
-    console.error("Error in PDF to Excel conversion:", error);
-    throw error;
-  }
-};
-
-// Function to generate Excel file from transactions
-export const generateExcelFile = (transactions: Transaction[]): Blob => {
-  // Create a new workbook
-  const workbook = XLSX.utils.book_new();
-  
-  // Convert transactions to worksheet data
-  const worksheetData = [
-    ['Date', 'Description', 'Amount', 'Category'], // Header row
-    ...transactions.map(t => [t.date, t.description, t.amount, t.category])
-  ];
-  
-  // Create worksheet
-  const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
-  
-  // Add worksheet to workbook
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'Bank Statement');
-  
-  // Convert workbook to binary Excel file
-  const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
-  
-  // Create Blob from the buffer
-  return new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-};
-
-export const downloadExcelFile = (data: Blob, filename: string = "bank-statement.xlsx"): void => {
-  // Create a download link and trigger it
-  const url = URL.createObjectURL(data);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-};
+      { date: "01/04", description: "Scheels
