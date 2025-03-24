@@ -77,7 +77,7 @@ export const pdfToBase64 = (pdfBuffer: ArrayBuffer): string => {
 
 // Parse transactions using Claude AI with support for PDF documents
 export const parseTransactionsWithAI = async (
-  pdfText: string[] | ArrayBuffer,
+  pdfData: string[] | ArrayBuffer,
   apiKey: string = DEFAULT_CLAUDE_API_KEY
 ): Promise<Transaction[]> => {
   try {
@@ -87,9 +87,10 @@ export const parseTransactionsWithAI = async (
     let modelToUse = "claude-3-haiku-20240307"; // Default model
     
     // Check if we're receiving raw PDF data (ArrayBuffer) or extracted text
-    if (pdfText instanceof ArrayBuffer) {
+    if (pdfData instanceof ArrayBuffer) {
       console.log("Received raw PDF data, using document-based API call");
-      const base64Data = pdfToBase64(pdfText);
+      const base64Data = pdfToBase64(pdfData);
+      console.log("PDF converted to base64, size:", base64Data.length);
       
       // When sending PDFs directly, we need to use the newer model that supports PDFs
       modelToUse = "claude-3-5-sonnet-20241022";
@@ -135,7 +136,7 @@ export const parseTransactionsWithAI = async (
       ];
     } else {
       // The full text from the PDF (text-based approach)
-      const fullText = pdfText.join('\n');
+      const fullText = pdfData.join('\n');
       
       // Prepare the prompt for Claude (text-based approach)
       messages = [
@@ -179,14 +180,14 @@ export const parseTransactionsWithAI = async (
       messages
     };
     
-    // Add special headers for PDF processing if needed
+    // Call the Claude API
     const data = await ApiService.callClaudeApi(apiKey, options);
     
-    console.log("Claude API response:", data);
+    console.log("Claude API response received");
     
     if (data && data.content && data.content[0] && data.content[0].text) {
       const content = data.content[0].text;
-      console.log("Claude content:", content.substring(0, 200) + "...");
+      console.log("Claude content preview:", content.substring(0, 200) + "...");
       
       // Try to parse the content as JSON or extract JSON from it
       try {

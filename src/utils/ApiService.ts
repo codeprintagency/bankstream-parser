@@ -29,10 +29,17 @@ export class ApiService {
       const apiUrl = `/api/claude/v1/messages?_t=${timestamp}`;
       
       console.log("API URL:", apiUrl);
+      console.log("Using model:", options.model);
+      
+      // Check if we're dealing with PDF documents
+      const hasPdfDocuments = isPdfRequest(options);
+      if (hasPdfDocuments) {
+        console.log("Detected PDF document in request. Using PDF-compatible model and headers.");
+      }
       
       const controller = new AbortController();
-      // Set a timeout of 30 seconds
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      // Set a timeout of 45 seconds for PDF processing (it can take longer)
+      const timeoutId = setTimeout(() => controller.abort(), hasPdfDocuments ? 45000 : 30000);
       
       // Prepare headers with the PDF beta support and CORS access
       const headers: Record<string, string> = {
@@ -46,10 +53,12 @@ export class ApiService {
       };
       
       // Add the PDF beta header if we're dealing with documents
-      if (isPdfRequest(options)) {
+      if (hasPdfDocuments) {
         headers["anthropic-beta"] = "pdfs-2024-09-25";
         console.log("Adding PDF beta header for document processing");
       }
+      
+      console.log("Request payload size:", JSON.stringify(options).length);
       
       // Make the request through our proxy
       const response = await fetch(apiUrl, {

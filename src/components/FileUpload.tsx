@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
@@ -18,6 +17,7 @@ const FileUpload: React.FC = () => {
   const [isConverted, setIsConverted] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [useAI, setUseAI] = useState(false);
+  const [directPdfUpload, setDirectPdfUpload] = useState(true); // Default to direct PDF upload
   const [isPremium, setIsPremium] = useState(() => hasPremiumAccess());
   const [debugModalOpen, setDebugModalOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -92,40 +92,38 @@ const FileUpload: React.FC = () => {
           return;
         }
         
-        // Extract text from PDF for AI processing
-        const extractedText = await extractTextFromPdf(file);
+        toast({
+          title: "AI Processing",
+          description: `Sending to Claude AI for analysis${directPdfUpload ? " using direct PDF upload" : ""}...`,
+        });
         
-        try {
-          toast({
-            title: "AI Processing",
-            description: "Sending to Claude AI for analysis (this may take a moment)...",
-          });
+        let aiExtractedTransactions;
+        
+        if (directPdfUpload) {
+          // Direct PDF upload approach - send the raw PDF data
+          const arrayBuffer = await file.arrayBuffer();
+          console.log("Using direct PDF upload method, file size:", arrayBuffer.byteLength);
           
-          // Use AI parsing with the default API key
-          const aiExtractedTransactions = await parseTransactionsWithAI(extractedText);
-          setTransactions(aiExtractedTransactions);
+          // Use AI parsing with the raw PDF data
+          aiExtractedTransactions = await parseTransactionsWithAI(arrayBuffer);
+        } else {
+          // Text extraction approach
+          const extractedText = await extractTextFromPdf(file);
+          console.log("Using text extraction method, text length:", 
+            extractedText.reduce((sum, text) => sum + text.length, 0));
           
-          toast({
-            title: "AI Conversion Successful",
-            description: `${aiExtractedTransactions.length} transactions have been extracted from your statement`,
-          });
-          
-          setIsConverted(true);
-        } catch (aiError: any) {
-          console.error("AI parsing failed:", aiError);
-          
-          // Set error message and open debug modal
-          setError(aiError.message || "AI parsing failed");
-          setDebugModalOpen(true);
-          
-          toast({
-            title: "AI Parsing Failed",
-            description: aiError.message || "Unknown error occurred",
-            variant: "destructive",
-          });
-          
-          // Don't fall back to traditional parsing, just show the error
+          // Use AI parsing with the extracted text
+          aiExtractedTransactions = await parseTransactionsWithAI(extractedText);
         }
+        
+        setTransactions(aiExtractedTransactions);
+        
+        toast({
+          title: "AI Conversion Successful",
+          description: `${aiExtractedTransactions.length} transactions have been extracted from your statement`,
+        });
+        
+        setIsConverted(true);
       } else {
         // Use traditional parsing
         const extractedTransactions = await convertPdfToExcel(file);
@@ -150,7 +148,7 @@ const FileUpload: React.FC = () => {
     } finally {
       setIsConverting(false);
     }
-  }, [file, toast, useAI, isPremium]);
+  }, [file, toast, useAI, isPremium, directPdfUpload]);
 
   const handleDownload = useCallback(() => {
     if (transactions.length === 0) return;
@@ -178,17 +176,34 @@ const FileUpload: React.FC = () => {
     <section id="file-upload-section" className="container mx-auto px-4 md:px-8 py-16 md:py-24">
       <div className="max-w-4xl mx-auto">
         <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center space-x-2">
-            <Switch 
-              id="parsing-mode" 
-              checked={useAI} 
-              onCheckedChange={setUseAI} 
-              disabled={isConverting}
-            />
-            <Label htmlFor="parsing-mode" className="flex items-center">
-              <span>AI Parsing</span>
-              {useAI && <Zap className="w-4 h-4 ml-1 text-yellow-500" />}
-            </Label>
+          <div className="flex flex-col space-y-2 sm:flex-row sm:space-y-0 sm:space-x-6">
+            <div className="flex items-center space-x-2">
+              <Switch 
+                id="parsing-mode" 
+                checked={useAI} 
+                onCheckedChange={setUseAI} 
+                disabled={isConverting}
+              />
+              <Label htmlFor="parsing-mode" className="flex items-center">
+                <span>AI Parsing</span>
+                {useAI && <Zap className="w-4 h-4 ml-1 text-yellow-500" />}
+              </Label>
+            </div>
+            
+            {useAI && (
+              <div className="flex items-center space-x-2">
+                <Switch 
+                  id="pdf-upload-mode" 
+                  checked={directPdfUpload} 
+                  onCheckedChange={setDirectPdfUpload} 
+                  disabled={isConverting}
+                />
+                <Label htmlFor="pdf-upload-mode" className="flex items-center">
+                  <span>Direct PDF Upload</span>
+                  {directPdfUpload && <FileText className="w-4 h-4 ml-1 text-blue-500" />}
+                </Label>
+              </div>
+            )}
           </div>
           
           <div className="flex items-center space-x-2">
@@ -273,7 +288,7 @@ const FileUpload: React.FC = () => {
               : error
                 ? "An error occurred while processing your file. Check the debug information."
                 : file 
-                  ? `Selected file: ${file.name}${useAI ? " (AI Mode)" : ""}` 
+                  ? `Selected file: ${file.name}${useAI ? (directPdfUpload ? " (AI with Direct PDF Upload)" : " (AI with Text Extraction)") : ""}`
                   : `Drag and drop your PDF bank statement here, or click to browse files${useAI ? ". Using AI mode" : ""}`
             }
           </p>
@@ -301,7 +316,9 @@ const FileUpload: React.FC = () => {
               disabled={isConverting}
               className="relative"
             >
-              {isConverting ? "Converting..." : useAI ? "Convert with Claude AI" : "Convert to Excel"}
+              {isConverting ? "Converting..." : useAI ? 
+                (directPdfUpload ? "Convert with Direct PDF Upload" : "Convert with Text Extraction") 
+                : "Convert to Excel"}
               {isConverting && (
                 <span className="absolute inset-0 flex items-center justify-center">
                   <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
