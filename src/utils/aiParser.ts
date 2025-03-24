@@ -64,56 +64,122 @@ function extractJsonFromResponse(responseText: string): any {
   }
 }
 
-// Parse transactions using Claude AI
+// Convert PDF content to base64 for Claude API
+export const pdfToBase64 = (pdfBuffer: ArrayBuffer): string => {
+  // Convert ArrayBuffer to Base64
+  const binary = new Uint8Array(pdfBuffer);
+  const bytes: string[] = [];
+  for (let i = 0; i < binary.byteLength; i++) {
+    bytes.push(String.fromCharCode(binary[i]));
+  }
+  return btoa(bytes.join(''));
+};
+
+// Parse transactions using Claude AI with support for PDF documents
 export const parseTransactionsWithAI = async (
-  pdfText: string[],
+  pdfText: string[] | ArrayBuffer,
   apiKey: string = DEFAULT_CLAUDE_API_KEY
 ): Promise<Transaction[]> => {
   try {
-    // The full text from the PDF
-    const fullText = pdfText.join('\n');
+    console.log("Starting AI parsing process");
     
-    // Prepare the prompt for Claude
-    const prompt = `
-      You are a financial data extraction specialist. I need you to extract ALL transactions from the following bank statement text.
+    let messages;
+    let modelToUse = "claude-3-haiku-20240307"; // Default model
+    
+    // Check if we're receiving raw PDF data (ArrayBuffer) or extracted text
+    if (pdfText instanceof ArrayBuffer) {
+      console.log("Received raw PDF data, using document-based API call");
+      const base64Data = pdfToBase64(pdfText);
       
-      Instructions:
-      1. Identify every transaction including the date, description, and amount
-      2. For descriptions with multiple lines, combine them into a single coherent description
-      3. Categorize each transaction (categories: Dining, Groceries, Transportation, Shopping, Bills, Entertainment, Health, Income, Transfer, Other)
-      4. Format amounts as numeric values (e.g., "51.60" not "$51.60")
-      5. Use MM/DD format for dates (e.g., "12/25")
-      6. Be thorough - capture EVERY transaction, even if the format is irregular
-      7. If amounts appear to be deposits or credits, include them with the correct sign
+      // When sending PDFs directly, we need to use the newer model that supports PDFs
+      modelToUse = "claude-3-5-sonnet-20241022";
       
-      VERY IMPORTANT: Format your response as a clean JSON array with NO explanations or other text before or after the JSON.
-      Each transaction should have these fields:
-      {
-        "date": "MM/DD",
-        "description": "Merchant name and details",
-        "amount": "XX.XX",
-        "category": "Category name"
-      }
+      messages = [
+        {
+          role: "user",
+          content: [
+            {
+              type: "document",
+              source: {
+                type: "base64",
+                media_type: "application/pdf",
+                data: base64Data
+              }
+            },
+            {
+              type: "text",
+              text: `
+                You are a financial data extraction specialist. I need you to extract ALL transactions from this bank statement PDF.
+                
+                Instructions:
+                1. Identify every transaction including the date, description, and amount
+                2. For descriptions with multiple lines, combine them into a single coherent description
+                3. Categorize each transaction (categories: Dining, Groceries, Transportation, Shopping, Bills, Entertainment, Health, Income, Transfer, Other)
+                4. Format amounts as numeric values (e.g., "51.60" not "$51.60")
+                5. Use MM/DD format for dates (e.g., "12/25")
+                6. Be thorough - capture EVERY transaction, even if the format is irregular
+                7. If amounts appear to be deposits or credits, include them with the correct sign
+                
+                VERY IMPORTANT: Format your response as a clean JSON array with NO explanations or other text before or after the JSON.
+                Each transaction should have these fields:
+                {
+                  "date": "MM/DD",
+                  "description": "Merchant name and details",
+                  "amount": "XX.XX",
+                  "category": "Category name"
+                }
+              `
+            }
+          ]
+        }
+      ];
+    } else {
+      // The full text from the PDF (text-based approach)
+      const fullText = pdfText.join('\n');
       
-      Here is the bank statement:
-      ${fullText.substring(0, 12000)}
-    `;
+      // Prepare the prompt for Claude (text-based approach)
+      messages = [
+        {
+          role: "user",
+          content: `
+            You are a financial data extraction specialist. I need you to extract ALL transactions from the following bank statement text.
+            
+            Instructions:
+            1. Identify every transaction including the date, description, and amount
+            2. For descriptions with multiple lines, combine them into a single coherent description
+            3. Categorize each transaction (categories: Dining, Groceries, Transportation, Shopping, Bills, Entertainment, Health, Income, Transfer, Other)
+            4. Format amounts as numeric values (e.g., "51.60" not "$51.60")
+            5. Use MM/DD format for dates (e.g., "12/25")
+            6. Be thorough - capture EVERY transaction, even if the format is irregular
+            7. If amounts appear to be deposits or credits, include them with the correct sign
+            
+            VERY IMPORTANT: Format your response as a clean JSON array with NO explanations or other text before or after the JSON.
+            Each transaction should have these fields:
+            {
+              "date": "MM/DD",
+              "description": "Merchant name and details",
+              "amount": "XX.XX",
+              "category": "Category name"
+            }
+            
+            Here is the bank statement:
+            ${fullText.substring(0, 12000)}
+          `
+        }
+      ];
+    }
 
     console.log("Sending request to Claude with API key:", apiKey.substring(0, 8) + "...");
+    console.log("Using model:", modelToUse);
     
     // Prepare request options
     const options = {
-      model: "claude-3-haiku-20240307",
+      model: modelToUse,
       max_tokens: 4000,
-      messages: [
-        {
-          role: "user",
-          content: prompt
-        }
-      ]
+      messages
     };
     
-    // Try the improved API call method
+    // Add special headers for PDF processing if needed
     const data = await ApiService.callClaudeApi(apiKey, options);
     
     console.log("Claude API response:", data);

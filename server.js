@@ -25,7 +25,7 @@ app.use((req, res, next) => {
   // Set CORS headers for all responses
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, x-api-key, anthropic-version, anthropic-dangerous-direct-browser-access, Authorization');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, x-api-key, anthropic-version, anthropic-beta, anthropic-dangerous-direct-browser-access, Authorization');
   res.header('Access-Control-Allow-Credentials', 'true');
   res.header('Access-Control-Max-Age', '86400');
   
@@ -71,6 +71,12 @@ app.use('/api/claude', createProxyMiddleware({
     proxyReq.setHeader('anthropic-dangerous-direct-browser-access', 'true');
     console.log('Setting anthropic-dangerous-direct-browser-access header');
     
+    // Add the PDF beta header if present in the original request
+    if (req.headers['anthropic-beta']) {
+      proxyReq.setHeader('anthropic-beta', req.headers['anthropic-beta']);
+      console.log('Setting anthropic-beta header for PDF support:', req.headers['anthropic-beta']);
+    }
+    
     // Content type is critical
     proxyReq.setHeader('content-type', 'application/json');
     console.log('Setting content-type header');
@@ -82,6 +88,12 @@ app.use('/api/claude', createProxyMiddleware({
     if (req.body && Object.keys(req.body).length > 0) {
       const bodyData = JSON.stringify(req.body);
       console.log('Request body (first 200 chars):', bodyData.substring(0, 200) + '...');
+      
+      // Check if the request contains PDF document content
+      const hasPdfContent = isPdfRequest(req.body);
+      if (hasPdfContent) {
+        console.log('Detected PDF content in the request');
+      }
       
       // Update content-length to match the body length
       proxyReq.setHeader('content-length', Buffer.byteLength(bodyData));
@@ -101,7 +113,7 @@ app.use('/api/claude', createProxyMiddleware({
     // Add CORS headers to response
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, x-api-key, anthropic-version, anthropic-dangerous-direct-browser-access, Authorization');
+    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, x-api-key, anthropic-version, anthropic-beta, anthropic-dangerous-direct-browser-access, Authorization');
     
     // Make sure we're setting the right content type
     if (proxyRes.headers['content-type']) {
@@ -167,6 +179,22 @@ app.use('/api/claude', createProxyMiddleware({
     console.error('=== PROXY ERROR END ===');
   }
 }));
+
+// Helper function to check if the request contains PDF documents
+function isPdfRequest(body) {
+  if (!body || !body.messages) return false;
+  
+  return body.messages.some(message => {
+    if (typeof message.content === 'string') return false;
+    if (!Array.isArray(message.content)) return false;
+    
+    return message.content.some(item => 
+      item.type === 'document' && 
+      item.source?.type === 'base64' && 
+      item.source?.media_type === 'application/pdf'
+    );
+  });
+}
 
 // Serve static files from the dist directory
 app.use(express.static(path.join(__dirname, 'dist')));

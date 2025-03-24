@@ -3,6 +3,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
+import { IncomingMessage, ServerResponse } from "http";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
@@ -47,6 +48,12 @@ export default defineConfig(({ mode }) => ({
               console.log('Setting content-type header');
             }
             
+            // Add the PDF beta header if present in the original request
+            if (req.headers && req.headers['anthropic-beta']) {
+              proxyReq.setHeader('anthropic-beta', req.headers['anthropic-beta']);
+              console.log('Setting anthropic-beta header for PDF support');
+            }
+            
             // Add the new direct browser access header
             proxyReq.setHeader('anthropic-dangerous-direct-browser-access', 'true');
             console.log('Setting anthropic-dangerous-direct-browser-access header');
@@ -66,7 +73,7 @@ export default defineConfig(({ mode }) => ({
             // Add CORS headers to response
             res.setHeader('Access-Control-Allow-Origin', '*');
             res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-            res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-api-key, anthropic-version, anthropic-dangerous-direct-browser-access');
+            res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-api-key, anthropic-version, anthropic-beta, anthropic-dangerous-direct-browser-access');
             
             // Handle preflight OPTIONS request
             if (req.method === 'OPTIONS') {
@@ -92,7 +99,7 @@ export default defineConfig(({ mode }) => ({
               const originalEnd = res.end;
               
               // Safely override write method
-              res.write = function(chunk) {
+              res.write = function(chunk: any) {
                 if (chunk) {
                   responseBody += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : chunk;
                 }
@@ -101,7 +108,7 @@ export default defineConfig(({ mode }) => ({
               };
               
               // Safely override end method
-              res.end = function(chunk) {
+              res.end = function(chunk: any) {
                 if (chunk) {
                   responseBody += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : chunk;
                 }

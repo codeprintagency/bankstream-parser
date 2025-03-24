@@ -8,7 +8,7 @@ interface ClaudeRequestOptions {
   max_tokens: number;
   messages: {
     role: string;
-    content: string;
+    content: string | Array<{type: string, text?: string, source?: any}>;
   }[];
 }
 
@@ -34,18 +34,27 @@ export class ApiService {
       // Set a timeout of 30 seconds
       const timeoutId = setTimeout(() => controller.abort(), 30000);
       
+      // Prepare headers with the PDF beta support and CORS access
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0"
+      };
+      
+      // Add the PDF beta header if we're dealing with documents
+      if (isPdfRequest(options)) {
+        headers["anthropic-beta"] = "pdfs-2024-09-25";
+        console.log("Adding PDF beta header for document processing");
+      }
+      
       // Make the request through our proxy
       const response = await fetch(apiUrl, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true",
-          "Cache-Control": "no-cache, no-store, must-revalidate",
-          "Pragma": "no-cache",
-          "Expires": "0"
-        },
+        headers,
         body: JSON.stringify(options),
         credentials: 'same-origin',
         signal: controller.signal
@@ -101,8 +110,35 @@ export class ApiService {
     }
   }
   
+  // Helper to check if we're sending a PDF document
+  static isPdfDocument(content: any): boolean {
+    if (Array.isArray(content)) {
+      return content.some(item => 
+        item.type === 'document' && 
+        item.source?.type === 'base64' && 
+        item.source?.media_type === 'application/pdf'
+      );
+    }
+    return false;
+  }
+  
   // Get the last raw response for debugging
   static getLastRawResponse(): string {
     return this.lastRawResponse;
   }
+}
+
+// Helper function to check if the request contains PDF documents
+function isPdfRequest(options: ClaudeRequestOptions): boolean {
+  return options.messages.some(message => {
+    if (typeof message.content === 'string') {
+      return false;
+    }
+    return Array.isArray(message.content) && 
+      message.content.some(item => 
+        item.type === 'document' && 
+        item.source?.type === 'base64' && 
+        item.source?.media_type === 'application/pdf'
+      );
+  });
 }
