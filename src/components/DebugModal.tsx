@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getLastHtmlResponse } from "@/utils/aiParser";
-import { AlertCircle, Bug, Code, Copy, ExternalLink } from "lucide-react";
+import { AlertCircle, Bug, Code, Copy, ExternalLink, Terminal } from "lucide-react";
 
 interface DebugModalProps {
   open: boolean;
@@ -61,8 +61,16 @@ const DebugModal: React.FC<DebugModalProps> = ({ open, onOpenChange }) => {
                 The browser is being blocked from making direct requests to the API.
               </p>
               <p className="text-sm">
-                <strong>Solution:</strong> Try refreshing the page. If the issue persists, make sure you're using the server proxy by running <code>npm run dev</code> from the command line.
+                <strong>Solution:</strong> Make sure you're running the app with <code>node server.js</code> instead of just <code>npm run dev</code>.
+                The server.js file includes a proxy that handles CORS issues for you.
               </p>
+              <div className="mt-2 p-2 bg-amber-100 rounded text-xs font-mono">
+                <div className="flex items-center gap-1 mb-1">
+                  <Terminal className="w-3 h-3" />
+                  <span className="font-semibold">Run this command:</span>
+                </div>
+                <code>node server.js</code>
+              </div>
               <Button 
                 variant="outline" 
                 size="sm" 
@@ -102,7 +110,7 @@ const DebugModal: React.FC<DebugModalProps> = ({ open, onOpenChange }) => {
             <TabsTrigger value="raw">Raw Response</TabsTrigger>
             {isHtml && <TabsTrigger value="preview">HTML Preview</TabsTrigger>}
             {isHtml && <TabsTrigger value="formatted">Formatted HTML</TabsTrigger>}
-            {isHtml && <TabsTrigger value="troubleshooting">Troubleshooting</TabsTrigger>}
+            <TabsTrigger value="troubleshooting">Troubleshooting</TabsTrigger>
           </TabsList>
           
           <TabsContent value="raw">
@@ -153,51 +161,76 @@ const DebugModal: React.FC<DebugModalProps> = ({ open, onOpenChange }) => {
             </TabsContent>
           )}
           
-          {isHtml && (
-            <TabsContent value="troubleshooting">
-              <ScrollArea className="h-[60vh] border rounded-md p-4">
-                <div className="space-y-4">
-                  <h3 className="text-lg font-medium">Common CORS Issues & Solutions</h3>
-                  
-                  <div className="space-y-2">
-                    <h4 className="font-medium">1. Using Server Proxy</h4>
-                    <p>This application uses a server proxy to avoid CORS issues. Make sure you're running the app with <code>npm run dev</code> to start both the frontend and the proxy server.</p>
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <h4 className="font-medium">2. API Key Issues</h4>
-                    <p>Ensure your Claude API key is valid and has not expired. The API key should start with <code>sk-ant-api03-</code> for the latest Claude models.</p>
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <h4 className="font-medium">3. Model Availability</h4>
-                    <p>When working with PDFs, make sure you're using <code>claude-3-5-sonnet-20241022</code> as it's the only model that supports the PDF beta feature at this time.</p>
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <h4 className="font-medium">4. Try Text Extraction Instead</h4>
-                    <p>If direct PDF upload isn't working, switch to the text extraction method which might be more reliable in some environments.</p>
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <h4 className="font-medium">5. PDF Size Limitations</h4>
-                    <p>Large PDFs might exceed the API's size limits. Try with a smaller PDF or use text extraction for very large documents.</p>
-                  </div>
-                  
-                  <div className="mt-4 pt-4 border-t">
-                    <Button 
-                      variant="outline" 
-                      className="flex items-center gap-1"
-                      onClick={() => window.open("https://docs.anthropic.com/claude/reference/messages-create", "_blank")}
-                    >
-                      <ExternalLink className="w-4 h-4" />
-                      View Claude API Documentation
-                    </Button>
+          <TabsContent value="troubleshooting">
+            <ScrollArea className="h-[60vh] border rounded-md p-4">
+              <div className="space-y-4">
+                <h3 className="text-lg font-medium">Common Claude API Issues & Solutions</h3>
+                
+                <div className="space-y-2 border-l-2 border-blue-300 pl-3">
+                  <h4 className="font-medium">1. Server Not Running Correctly</h4>
+                  <p className="text-sm">Make sure you start the app with <code>node server.js</code> instead of just <code>npm run dev</code>. 
+                  The server.js file includes a proxy that forwards requests to Claude's API and handles CORS issues for you.</p>
+                  <div className="bg-gray-100 p-2 rounded text-xs font-mono mt-1">
+                    <code>node server.js</code>
                   </div>
                 </div>
-              </ScrollArea>
-            </TabsContent>
-          )}
+                
+                <div className="space-y-2 border-l-2 border-blue-300 pl-3">
+                  <h4 className="font-medium">2. API Key Issues</h4>
+                  <p className="text-sm">Ensure your Claude API key is valid and has not expired. The API key should start with <code>sk-ant-api03-</code> for the latest Claude models.</p>
+                  <p className="text-sm">The API key must have permissions to use the Claude 3.5 Sonnet model for PDF processing.</p>
+                </div>
+                
+                <div className="space-y-2 border-l-2 border-blue-300 pl-3">
+                  <h4 className="font-medium">3. PDF Size Issues</h4>
+                  <p className="text-sm">Claude has a limit of 10MB per request. If your PDF is larger than this, it will be rejected.
+                  Try using a smaller PDF or the text extraction method instead.</p>
+                </div>
+                
+                <div className="space-y-2 border-l-2 border-blue-300 pl-3">
+                  <h4 className="font-medium">4. Network and Firewall Issues</h4>
+                  <p className="text-sm">If you're on a corporate network or using a VPN, it might block connections to external APIs.
+                  Try on a different network or disable your VPN temporarily.</p>
+                </div>
+                
+                <div className="space-y-2 border-l-2 border-blue-300 pl-3">
+                  <h4 className="font-medium">5. Text Extraction Fallback</h4>
+                  <p className="text-sm">If direct PDF upload isn't working, switch to the text extraction method which extracts 
+                  text from the PDF first and then sends only the text to Claude. This approach is more reliable in some environments.</p>
+                </div>
+                
+                <div className="mt-6 p-3 bg-blue-50 border border-blue-200 rounded-md text-blue-700">
+                  <h4 className="font-medium flex items-center gap-1 mb-2">
+                    <Terminal className="w-4 h-4" />
+                    Check Your Terminal/Console
+                  </h4>
+                  <p className="text-sm">
+                    The server logs detailed information about API requests and responses in the terminal.
+                    Look for error messages or warnings that might indicate what's going wrong.
+                  </p>
+                </div>
+                
+                <div className="mt-4 pt-4 border-t">
+                  <Button 
+                    variant="outline" 
+                    className="flex items-center gap-1"
+                    onClick={() => window.open("https://docs.anthropic.com/claude/reference/messages-create", "_blank")}
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    View Claude API Documentation
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="flex items-center gap-1 ml-2" 
+                    onClick={() => window.open("https://docs.anthropic.com/claude/docs/pdf-support", "_blank")}
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    Claude PDF Support Docs
+                  </Button>
+                </div>
+              </div>
+            </ScrollArea>
+          </TabsContent>
         </Tabs>
       </DialogContent>
     </Dialog>

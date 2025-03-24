@@ -13,6 +13,9 @@ const PORT = process.env.PORT || 8080;
 // Debug middleware to log requests
 app.use((req, res, next) => {
   console.log(`${req.method} ${req.url}`);
+  if (req.url.includes('/api/claude')) {
+    console.log('Claude API request headers:', JSON.stringify(req.headers, null, 2));
+  }
   next();
 });
 
@@ -31,6 +34,7 @@ app.use((req, res, next) => {
   
   // Handle preflight OPTIONS request
   if (req.method === 'OPTIONS') {
+    console.log('Responding to OPTIONS preflight request');
     return res.status(200).end();
   }
   
@@ -44,11 +48,12 @@ app.use('/api/claude', createProxyMiddleware({
   pathRewrite: {
     '^/api/claude': ''
   },
+  logLevel: 'debug',
   onProxyReq: (proxyReq, req, res) => {
     console.log('=== PROXY REQUEST START ===');
     console.log('Original request URL:', req.url);
     console.log('Method:', req.method);
-    console.log('Original request headers:', req.headers);
+    console.log('Target URL:', 'https://api.anthropic.com' + req.url.replace(/^\/api\/claude/, ''));
     
     // Clean up existing headers that might be causing issues
     proxyReq.removeHeader('host');
@@ -58,14 +63,14 @@ app.use('/api/claude', createProxyMiddleware({
     // Always include essential headers
     if (req.headers['x-api-key']) {
       proxyReq.setHeader('x-api-key', req.headers['x-api-key']);
-      console.log('Setting x-api-key header');
+      console.log('Setting x-api-key header:', req.headers['x-api-key'].substring(0, 10) + '...');
     } else {
-      console.warn('Warning: No x-api-key header found in request');
+      console.warn('WARNING: No x-api-key header found in request');
     }
     
     // Set required Anthropic headers
     proxyReq.setHeader('anthropic-version', req.headers['anthropic-version'] || '2023-06-01');
-    console.log('Setting anthropic-version header');
+    console.log('Setting anthropic-version header:', req.headers['anthropic-version'] || '2023-06-01');
     
     // Add the direct browser access header that allows CORS
     proxyReq.setHeader('anthropic-dangerous-direct-browser-access', 'true');
@@ -79,24 +84,49 @@ app.use('/api/claude', createProxyMiddleware({
     
     // Content type is critical
     proxyReq.setHeader('content-type', 'application/json');
-    console.log('Setting content-type header');
+    console.log('Setting content-type header: application/json');
     
     // Log the modified headers
-    console.log('Forwarded proxy request headers:', proxyReq.getHeaders());
+    console.log('Forwarded proxy request headers:', JSON.stringify(Object.fromEntries(
+      Object.entries(proxyReq.getHeaders())
+    ), null, 2));
     
     // Log the request body if it exists
     if (req.body && Object.keys(req.body).length > 0) {
       const bodyData = JSON.stringify(req.body);
-      console.log('Request body (first 200 chars):', bodyData.substring(0, 200) + '...');
+      console.log('Request body size:', bodyData.length, 'bytes');
+      console.log('Request model:', req.body.model || 'not specified');
       
       // Check if the request contains PDF document content
       const hasPdfContent = isPdfRequest(req.body);
       if (hasPdfContent) {
         console.log('Detected PDF content in the request');
+        // Log the size of the PDF if present
+        try {
+          let pdfSize = 0;
+          req.body.messages.forEach(message => {
+            if (Array.isArray(message.content)) {
+              message.content.forEach(item => {
+                if (item.type === 'document' && item.source?.type === 'base64' && item.source?.data) {
+                  pdfSize += item.source.data.length * 0.75; // Base64 is ~4/3 times the size of binary
+                }
+              });
+            }
+          });
+          
+          if (pdfSize > 1024 * 1024) {
+            console.log('PDF size:', (pdfSize / (1024 * 1024)).toFixed(2), 'MB');
+          } else {
+            console.log('PDF size:', (pdfSize / 1024).toFixed(2), 'KB');
+          }
+        } catch (err) {
+          console.log('Could not determine PDF size:', err.message);
+        }
       }
       
       // Update content-length to match the body length
       proxyReq.setHeader('content-length', Buffer.byteLength(bodyData));
+      console.log('Setting content-length header:', Buffer.byteLength(bodyData));
       
       // Write the body data
       proxyReq.write(bodyData);
@@ -108,7 +138,7 @@ app.use('/api/claude', createProxyMiddleware({
   onProxyRes: (proxyRes, req, res) => {
     console.log('=== PROXY RESPONSE START ===');
     console.log('Claude API response status:', proxyRes.statusCode);
-    console.log('Claude API response headers:', proxyRes.headers);
+    console.log('Claude API response headers:', JSON.stringify(proxyRes.headers, null, 2));
     
     // Add CORS headers to response
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -118,6 +148,7 @@ app.use('/api/claude', createProxyMiddleware({
     // Make sure we're setting the right content type
     if (proxyRes.headers['content-type']) {
       res.setHeader('Content-Type', proxyRes.headers['content-type']);
+      console.log('Setting Content-Type header in response:', proxyRes.headers['content-type']);
     }
     
     // Collect the response body for logging, especially on errors
@@ -144,21 +175,45 @@ app.use('/api/claude', createProxyMiddleware({
         
         // For HTML responses, we need to replace it with a clearer JSON error
         if (isHtml) {
+          console.error('Received HTML response from Claude API instead of JSON');
           // Don't send HTML to the client, send a clear JSON error instead
           // Clear any previous headers
           res.statusCode = 502;
           res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({
+          
+          const errorResponseJson = JSON.stringify({
             error: 'CORS error',
             message: 'Received HTML instead of JSON from the API server. This likely indicates a CORS or authentication issue.',
             statusCode: proxyRes.statusCode,
             htmlPreview: responseBody.substring(0, 500) + '...'
-          }));
-          console.log('Replaced HTML response with JSON error');
+          });
+          
+          console.log('Replacing HTML response with JSON error:', errorResponseJson);
+          res.end(errorResponseJson);
           return;
         }
       } else {
+        // For successful JSON responses
+        console.log('Response appears to be valid JSON');
         console.log('Response body preview (first 100 chars):', responseBody.substring(0, 100) + '...');
+        
+        // Validate that the response can be parsed as JSON
+        try {
+          JSON.parse(responseBody);
+          console.log('Successfully validated response as JSON');
+        } catch (e) {
+          console.error('Response is not valid JSON despite content-type:', e.message);
+          
+          // Replace the invalid response with a clear error
+          res.statusCode = 502;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({
+            error: 'Invalid JSON',
+            message: 'The API returned an invalid JSON response',
+            response: responseBody.substring(0, 500) + '...'
+          }));
+          return;
+        }
       }
       
       console.log('=== PROXY RESPONSE END ===');
@@ -173,6 +228,7 @@ app.use('/api/claude', createProxyMiddleware({
     res.status(502).json({ 
       error: 'Proxy error', 
       message: err.message,
+      stack: err.stack,
       timestamp: new Date().toISOString()
     });
     
@@ -207,4 +263,6 @@ app.get('*', (req, res) => {
 // Start the server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log(`To access the app, open: http://localhost:${PORT}`);
+  console.log('Make sure to run this server with "node server.js" instead of using "npm run dev" separately');
 });

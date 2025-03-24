@@ -23,6 +23,11 @@ export class ApiService {
   ): Promise<any> {
     try {
       console.log("Making API request to Claude");
+      console.log("Request details:", JSON.stringify({
+        model: options.model,
+        message_count: options.messages.length,
+        has_documents: isPdfRequest(options)
+      }));
       
       // Add a timestamp to prevent caching
       const timestamp = new Date().getTime();
@@ -37,6 +42,7 @@ export class ApiService {
       const hasPdfDocuments = isPdfRequest(options);
       if (hasPdfDocuments) {
         console.log("Detected PDF document in request. Using PDF-compatible model.");
+        console.log("PDF document size:", estimatePdfSize(options));
       }
       
       const controller = new AbortController();
@@ -56,25 +62,32 @@ export class ApiService {
         console.log("Adding PDF beta header for document processing");
       }
       
-      console.log("Request payload size:", JSON.stringify(options).length);
+      const requestPayload = JSON.stringify(options);
+      console.log("Request payload size:", requestPayload.length, "bytes");
+      console.log("Request headers:", JSON.stringify(headers, null, 2));
       
       try {
         // Make the request through our proxy
+        console.log("Sending request to proxy...");
         const response = await fetch(apiUrl, {
           method: "POST",
           headers,
-          body: JSON.stringify(options),
+          body: requestPayload,
           signal: controller.signal
         });
         
         clearTimeout(timeoutId);
         
-        // Log the response status
+        // Log the response status and headers
         console.log("API response status:", response.status);
+        console.log("API response headers:", JSON.stringify(Object.fromEntries([...response.headers.entries()]), null, 2));
         
         // Get the raw text response for debugging
         const responseText = await response.text();
         this.lastRawResponse = responseText;
+        
+        console.log("Response content type:", response.headers.get('content-type'));
+        console.log("Response text (first 200 chars):", responseText.substring(0, 200));
         
         // Check if the response is HTML
         const isHtml = 
@@ -97,6 +110,7 @@ export class ApiService {
         // Try to parse the response as JSON
         try {
           const jsonData = JSON.parse(responseText);
+          console.log("Successfully parsed JSON response");
           return jsonData;
         } catch (error) {
           console.error("Failed to parse response as JSON:", error);
@@ -134,4 +148,27 @@ function isPdfRequest(options: ClaudeRequestOptions): boolean {
         item.source?.media_type === 'application/pdf'
       );
   });
+}
+
+// Helper function to estimate PDF size for logging
+function estimatePdfSize(options: ClaudeRequestOptions): string {
+  let totalSize = 0;
+  
+  options.messages.forEach(message => {
+    if (Array.isArray(message.content)) {
+      message.content.forEach(item => {
+        if (item.type === 'document' && item.source?.type === 'base64' && item.source?.data) {
+          totalSize += item.source.data.length * 0.75; // Base64 is ~4/3 times the size of binary
+        }
+      });
+    }
+  });
+  
+  // Convert to KB or MB for readability
+  if (totalSize > 1024 * 1024) {
+    return (totalSize / (1024 * 1024)).toFixed(2) + " MB";
+  } else if (totalSize > 1024) {
+    return (totalSize / 1024).toFixed(2) + " KB";
+  }
+  return totalSize + " bytes";
 }
