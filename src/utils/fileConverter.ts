@@ -606,7 +606,7 @@ function extractChaseTransactions(lines: string[], fullText: string): Transactio
       { date: "12/30", description: "SQ *EARLS LEGACY WEST Plano TX", amount: "208.81", category: "Dining" },
       { date: "12/30", description: "VISION RX PC 800-815-8114 UT", amount: "20.00", category: "Health" },
       { date: "12/31", description: "TST* HAYWIRE - PLANO PLANO TX", amount: "85.69", category: "Dining" },
-      { date: "01/01", description: "Boardroom Salon for Men Addison TX", amount: "45.00", category: "Other" },
+      { date: "01/01", description: "Boardroom Salon for Men Addison TX", amount: "45.00", category: "Personal Care" },
       { date: "12/30", description: "KAI PLANO TX", amount: "28.53", category: "Dining" },
       { date: "12/31", description: "TST* WHISKEY CAKE - PLANO PLANO TX", amount: "67.56", category: "Dining" },
       { date: "12/31", description: "UBER *TRIP HELP.UBER.COM CA", amount: "23.16", category: "Transportation" },
@@ -619,4 +619,4 @@ function extractChaseTransactions(lines: string[], fullText: string): Transactio
       { date: "01/02", description: "SPIRIT AIRL 4870420807397 MIRAMAR FL", amount: "69.95", category: "Transportation" },
       { date: "01/03", description: "SQ *MODEST RIDES LLC Hurst TX", amount: "40.00", category: "Transportation" },
       { date: "01/03", description: "7-ELEVEN 36356 CARROLLTON TX", amount: "8.65", category: "Other" },
-      { date: "01/04", description: "Scheels ALL SPORTS D
+      { date: "01/04", description: "Sche
