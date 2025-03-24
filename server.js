@@ -122,7 +122,9 @@ app.use('/api/claude', createProxyMiddleware({
               responseBody.trim().startsWith('<!DOCTYPE') || 
               responseBody.trim().startsWith('<html') ||
               responseBody.includes('<head>') || 
-              responseBody.includes('<body>');
+              responseBody.includes('<body>') ||
+              responseBody.includes('<script') ||
+              responseBody.includes('<div');
       
       // Log response body on errors or when it's HTML
       if (proxyRes.statusCode !== 200 || isHtml) {
@@ -137,7 +139,8 @@ app.use('/api/claude', createProxyMiddleware({
           res.end(JSON.stringify({
             error: 'CORS error',
             message: 'Received HTML instead of JSON from the API server. This likely indicates a CORS or authentication issue.',
-            statusCode: proxyRes.statusCode
+            statusCode: proxyRes.statusCode,
+            htmlPreview: responseBody.substring(0, 500) + '...'
           }));
           console.log('Replaced HTML response with JSON error');
           return;

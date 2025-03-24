@@ -31,18 +31,36 @@ function extractJsonFromResponse(responseText: string): any {
     // First try direct JSON parsing
     return JSON.parse(responseText);
   } catch (e) {
-    // If that fails, try to extract JSON using regex
+    console.log("Failed direct JSON parsing, trying regex extraction");
+    
+    // If that fails, try to extract JSON using regex patterns
     try {
+      // Try to find an array of objects
       const jsonMatch = responseText.match(/\[\s*\{.*\}\s*\]/s);
       if (jsonMatch) {
+        console.log("Found JSON array match using regex");
         return JSON.parse(jsonMatch[0]);
+      }
+      
+      // Try to find a single JSON object
+      const objectMatch = responseText.match(/\{\s*".*"\s*:.+\}/s);
+      if (objectMatch) {
+        console.log("Found JSON object match using regex");
+        return JSON.parse(objectMatch[0]);
+      }
+      
+      // Try to look for markdown code blocks with JSON
+      const markdownMatch = responseText.match(/```(?:json)?\s*(\[.+\])\s*```/s);
+      if (markdownMatch && markdownMatch[1]) {
+        console.log("Found JSON in markdown code block");
+        return JSON.parse(markdownMatch[1]);
       }
     } catch (regexError) {
       console.error("Failed to extract JSON using regex", regexError);
     }
     
     // If all parsing attempts fail, throw error
-    throw new Error("Could not extract valid JSON from response");
+    throw new Error("Could not extract valid JSON from response. Response begins with: " + responseText.substring(0, 100));
   }
 }
 
@@ -113,11 +131,11 @@ export const parseTransactionsWithAI = async (
         console.error('Could not parse JSON in Claude response', jsonError);
         console.error('Claude response content:', content);
         
-        throw new Error('Failed to parse JSON from Claude response');
+        throw new Error('Failed to parse JSON from Claude response. Check the debug info for details.');
       }
     } else {
       console.error('Invalid Claude response structure:', data);
-      throw new Error('Invalid Claude response structure');
+      throw new Error('Invalid Claude response structure. Check the debug info for details.');
     }
   } catch (error: any) {
     console.error('Error parsing with AI:', error);

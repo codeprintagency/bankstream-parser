@@ -57,7 +57,10 @@ export default defineConfig(({ mode }) => ({
             ));
           });
           
-          proxy.on('proxyRes', (proxyRes, req, res, _options) => {
+          // Fix TypeScript errors by providing proper type definitions
+          type ProxyResCallback = (proxyRes: IncomingMessage, req: IncomingMessage, res: ServerResponse) => void;
+          
+          const onProxyRes: ProxyResCallback = function(proxyRes, req, res) {
             console.log(`Proxy response status: ${proxyRes.statusCode}`);
             
             // Add CORS headers to response
@@ -94,7 +97,7 @@ export default defineConfig(({ mode }) => ({
                   responseBody += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : chunk;
                 }
                 // Call original with properly typed arguments
-                return originalWrite.call(res, chunk);
+                return originalWrite.apply(res, arguments as any);
               };
               
               // Safely override end method
@@ -106,10 +109,12 @@ export default defineConfig(({ mode }) => ({
                 console.log('HTML response preview:', responseBody.substring(0, 1000) + '...');
                 
                 // Call original with properly typed arguments
-                return originalEnd.call(res, chunk);
+                return originalEnd.apply(res, arguments as any);
               };
             }
-          });
+          };
+          
+          proxy.on('proxyRes', onProxyRes);
         }
       }
     }

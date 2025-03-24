@@ -22,7 +22,7 @@ export class ApiService {
     options: ClaudeRequestOptions
   ): Promise<any> {
     try {
-      console.log("Making direct API request to Claude");
+      console.log("Making API request to Claude");
       
       // Add a timestamp to prevent caching
       const timestamp = new Date().getTime();
@@ -34,7 +34,7 @@ export class ApiService {
       // Set a timeout of 30 seconds
       const timeoutId = setTimeout(() => controller.abort(), 30000);
       
-      // Make the request through our proxy instead of directly to the API
+      // Make the request through our proxy
       const response = await fetch(apiUrl, {
         method: "POST",
         headers: {
@@ -65,13 +65,18 @@ export class ApiService {
       const responseText = await response.text();
       this.lastRawResponse = responseText;
       
-      // Check if the response contains HTML
-      if (contentType.includes('text/html') || 
-          responseText.trim().startsWith('<!DOCTYPE') || 
-          responseText.trim().startsWith('<html') ||
-          responseText.includes('<head>') || 
-          responseText.includes('<body>')) {
-        console.error("Received HTML instead of JSON from API:", responseText.substring(0, 200));
+      // More comprehensive check for HTML responses
+      const isHtml = 
+        contentType.includes('text/html') || 
+        responseText.trim().startsWith('<!DOCTYPE') || 
+        responseText.trim().startsWith('<html') ||
+        responseText.includes('<head>') || 
+        responseText.includes('<body>') ||
+        responseText.includes('<script') || 
+        responseText.includes('<div');
+      
+      if (isHtml) {
+        console.error("Received HTML instead of JSON from API:", responseText.substring(0, 500));
         throw new Error("Received HTML instead of JSON. The server is likely returning an error page. Check the debug modal for details.");
       }
       
