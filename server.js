@@ -28,7 +28,7 @@ app.use((req, res, next) => {
   // Set CORS headers for all responses
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, x-api-key, anthropic-version, anthropic-beta, anthropic-dangerous-direct-browser-access, Authorization');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, x-api-key, anthropic-version, anthropic-beta');
   res.header('Access-Control-Allow-Credentials', 'true');
   res.header('Access-Control-Max-Age', '86400');
   
@@ -71,10 +71,6 @@ app.use('/api/claude', createProxyMiddleware({
     // Set required Anthropic headers
     proxyReq.setHeader('anthropic-version', req.headers['anthropic-version'] || '2023-06-01');
     console.log('Setting anthropic-version header:', req.headers['anthropic-version'] || '2023-06-01');
-    
-    // Add the direct browser access header that allows CORS
-    proxyReq.setHeader('anthropic-dangerous-direct-browser-access', 'true');
-    console.log('Setting anthropic-dangerous-direct-browser-access header');
     
     // Add the PDF beta header if present in the original request
     if (req.headers['anthropic-beta']) {
@@ -143,7 +139,7 @@ app.use('/api/claude', createProxyMiddleware({
     // Add CORS headers to response
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, x-api-key, anthropic-version, anthropic-beta, anthropic-dangerous-direct-browser-access, Authorization');
+    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, x-api-key, anthropic-version, anthropic-beta');
     
     // Make sure we're setting the right content type
     if (proxyRes.headers['content-type']) {
@@ -165,9 +161,7 @@ app.use('/api/claude', createProxyMiddleware({
               responseBody.trim().startsWith('<!DOCTYPE') || 
               responseBody.trim().startsWith('<html') ||
               responseBody.includes('<head>') || 
-              responseBody.includes('<body>') ||
-              responseBody.includes('<script') ||
-              responseBody.includes('<div');
+              responseBody.includes('<body>');
       
       // Log response body on errors or when it's HTML
       if (proxyRes.statusCode !== 200 || isHtml) {
@@ -177,7 +171,6 @@ app.use('/api/claude', createProxyMiddleware({
         if (isHtml) {
           console.error('Received HTML response from Claude API instead of JSON');
           // Don't send HTML to the client, send a clear JSON error instead
-          // Clear any previous headers
           res.statusCode = 502;
           res.setHeader('Content-Type', 'application/json');
           

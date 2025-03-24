@@ -16,7 +16,7 @@ export class ApiService {
   // Storage for raw responses for debugging
   static lastRawResponse: string = '';
   
-  // Make an API request directly to Claude API with the new header
+  // Make an API request directly to Claude API with the proper headers
   static async callClaudeApi(
     apiKey: string,
     options: ClaudeRequestOptions
@@ -32,7 +32,7 @@ export class ApiService {
       // Add a timestamp to prevent caching
       const timestamp = new Date().getTime();
       
-      // Use the server proxy instead of direct API call
+      // Use the proxy URL for all requests - crucial for CORS
       const apiUrl = `/api/claude/v1/messages?_t=${timestamp}`;
       
       console.log("API URL:", apiUrl);
@@ -49,7 +49,7 @@ export class ApiService {
       // Set a timeout of 45 seconds for PDF processing (it can take longer)
       const timeoutId = setTimeout(() => controller.abort(), hasPdfDocuments ? 45000 : 30000);
       
-      // Always use the server proxy instead of direct API calls to avoid CORS
+      // Headers according to Claude's documentation
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
         "x-api-key": apiKey,
@@ -58,7 +58,7 @@ export class ApiService {
       
       // Add the PDF beta header if we're dealing with documents
       if (hasPdfDocuments) {
-        headers["anthropic-beta"] = "pdfs-2024-09-25";
+        headers["anthropic-beta"] = "pdfs-2023-01-01"; // Updated to match their supported version
         console.log("Adding PDF beta header for document processing");
       }
       
@@ -98,7 +98,7 @@ export class ApiService {
         
         if (isHtml) {
           console.error("Received HTML instead of JSON from API:", responseText.substring(0, 500));
-          throw new Error("Received HTML instead of JSON. The server is likely returning an error page. Check the debug modal for details.");
+          throw new Error("Received HTML instead of JSON. Make sure you're running the app with 'node server.js' to use the proxy server correctly.");
         }
         
         if (!response.ok) {

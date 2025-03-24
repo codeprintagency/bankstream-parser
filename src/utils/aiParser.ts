@@ -84,7 +84,8 @@ export const parseTransactionsWithAI = async (
     console.log("Starting AI parsing process");
     
     let messages;
-    let modelToUse = "claude-3-haiku-20240307"; // Default model
+    // Use Claude 3 Haiku as the default model - it's faster and cheaper
+    let modelToUse = "claude-3-haiku-20240307";
     
     // Check if we're receiving raw PDF data (ArrayBuffer) or extracted text
     if (pdfData instanceof ArrayBuffer) {
@@ -92,8 +93,9 @@ export const parseTransactionsWithAI = async (
       const base64Data = pdfToBase64(pdfData);
       console.log("PDF converted to base64, size:", base64Data.length);
       
-      // When sending PDFs directly, we need to use the newer model that supports PDFs
-      modelToUse = "claude-3-5-sonnet-20241022";
+      // When sending PDFs directly, we need to use a model that supports PDFs
+      // Going with Claude 3 Opus for best PDF handling
+      modelToUse = "claude-3-opus-20240229";
       
       messages = [
         {
