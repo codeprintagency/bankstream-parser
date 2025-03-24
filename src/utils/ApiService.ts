@@ -26,6 +26,8 @@ export class ApiService {
       
       // Add a timestamp to prevent caching
       const timestamp = new Date().getTime();
+      
+      // Use the server proxy instead of direct API call
       const apiUrl = `/api/claude/v1/messages?_t=${timestamp}`;
       
       console.log("API URL:", apiUrl);
@@ -34,22 +36,18 @@ export class ApiService {
       // Check if we're dealing with PDF documents
       const hasPdfDocuments = isPdfRequest(options);
       if (hasPdfDocuments) {
-        console.log("Detected PDF document in request. Using PDF-compatible model and headers.");
+        console.log("Detected PDF document in request. Using PDF-compatible model.");
       }
       
       const controller = new AbortController();
       // Set a timeout of 45 seconds for PDF processing (it can take longer)
       const timeoutId = setTimeout(() => controller.abort(), hasPdfDocuments ? 45000 : 30000);
       
-      // Prepare headers with the PDF beta support and CORS access
+      // Always use the server proxy instead of direct API calls to avoid CORS
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
         "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true",
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-        "Pragma": "no-cache",
-        "Expires": "0"
+        "anthropic-version": "2023-06-01"
       };
       
       // Add the PDF beta header if we're dealing with documents
@@ -60,75 +58,61 @@ export class ApiService {
       
       console.log("Request payload size:", JSON.stringify(options).length);
       
-      // Make the request through our proxy
-      const response = await fetch(apiUrl, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(options),
-        credentials: 'same-origin',
-        signal: controller.signal
-      });
-      
-      clearTimeout(timeoutId);
-      
-      // Log the response status
-      console.log("API response status:", response.status);
-      console.log("Response headers:", Object.fromEntries([...response.headers.entries()]));
-      
-      // Get the content type header
-      const contentType = response.headers.get('content-type') || '';
-      console.log("Content-Type:", contentType);
-      
-      // Get the raw text response for debugging
-      const responseText = await response.text();
-      this.lastRawResponse = responseText;
-      
-      // More comprehensive check for HTML responses
-      const isHtml = 
-        contentType.includes('text/html') || 
-        responseText.trim().startsWith('<!DOCTYPE') || 
-        responseText.trim().startsWith('<html') ||
-        responseText.includes('<head>') || 
-        responseText.includes('<body>') ||
-        responseText.includes('<script') || 
-        responseText.includes('<div');
-      
-      if (isHtml) {
-        console.error("Received HTML instead of JSON from API:", responseText.substring(0, 500));
-        throw new Error("Received HTML instead of JSON. The server is likely returning an error page. Check the debug modal for details.");
-      }
-      
-      if (!response.ok) {
-        const errorMsg = `API error: ${response.status} - ${responseText}`;
-        console.error(errorMsg);
-        throw new Error(errorMsg);
-      }
-      
-      // Try to parse the response as JSON
       try {
-        const jsonData = JSON.parse(responseText);
-        return jsonData;
-      } catch (error) {
-        console.error("Failed to parse response as JSON:", error);
-        throw new Error(`Failed to parse response as JSON: ${responseText.substring(0, 100)}...`);
+        // Make the request through our proxy
+        const response = await fetch(apiUrl, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(options),
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        // Log the response status
+        console.log("API response status:", response.status);
+        
+        // Get the raw text response for debugging
+        const responseText = await response.text();
+        this.lastRawResponse = responseText;
+        
+        // Check if the response is HTML
+        const isHtml = 
+          responseText.trim().startsWith('<!DOCTYPE') || 
+          responseText.trim().startsWith('<html') ||
+          responseText.includes('<head>') || 
+          responseText.includes('<body>');
+        
+        if (isHtml) {
+          console.error("Received HTML instead of JSON from API:", responseText.substring(0, 500));
+          throw new Error("Received HTML instead of JSON. The server is likely returning an error page. Check the debug modal for details.");
+        }
+        
+        if (!response.ok) {
+          const errorMsg = `API error: ${response.status} - ${responseText}`;
+          console.error(errorMsg);
+          throw new Error(errorMsg);
+        }
+        
+        // Try to parse the response as JSON
+        try {
+          const jsonData = JSON.parse(responseText);
+          return jsonData;
+        } catch (error) {
+          console.error("Failed to parse response as JSON:", error);
+          throw new Error(`Failed to parse response as JSON: ${responseText.substring(0, 100)}...`);
+        }
+      } catch (fetchError: any) {
+        if (fetchError.name === 'AbortError') {
+          throw new Error("Request timed out. This might happen with large PDFs, try again or use text extraction instead.");
+        }
+        throw fetchError;
       }
     } catch (error: any) {
       console.error("Error calling Claude API:", error);
       this.lastRawResponse = error.message || `Error: ${error}`;
       throw error;
     }
-  }
-  
-  // Helper to check if we're sending a PDF document
-  static isPdfDocument(content: any): boolean {
-    if (Array.isArray(content)) {
-      return content.some(item => 
-        item.type === 'document' && 
-        item.source?.type === 'base64' && 
-        item.source?.media_type === 'application/pdf'
-      );
-    }
-    return false;
   }
   
   // Get the last raw response for debugging
