@@ -1,3 +1,4 @@
+
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -29,7 +30,7 @@ app.use((req, res, next) => {
   // Set CORS headers for all responses
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, x-api-key, anthropic-version, anthropic-beta');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, x-api-key, anthropic-version, anthropic-beta, anthropic-dangerous-direct-browser-access');
   res.header('Access-Control-Allow-Credentials', 'true');
   res.header('Access-Control-Max-Age', '86400');
   
@@ -44,9 +45,18 @@ app.use((req, res, next) => {
 
 // Detect if we're running in a cloud environment (like Render.com or DigitalOcean)
 const isCloudEnvironment = !!process.env.CLOUD_ENVIRONMENT || 
-                          !!process.env.DIGITALOCEAN_APP || 
-                          !!process.env.RENDER || 
-                          process.env.NODE_ENV === 'production';
+                           !!process.env.RENDER || 
+                           !!process.env.DIGITALOCEAN_APP || 
+                           !!process.env.VERCEL || 
+                           process.env.NODE_ENV === 'production';
+
+console.log('Environment detection:', {
+  isRender: !!process.env.RENDER,
+  isDigitalOcean: !!process.env.DIGITALOCEAN_APP,
+  isVercel: !!process.env.VERCEL,
+  isCloudEnvironment,
+  nodeEnv: process.env.NODE_ENV
+});
 
 // Improved proxy middleware for Claude API with better error handling and extended timeout
 app.use('/api/claude', createProxyMiddleware({
@@ -86,6 +96,15 @@ app.use('/api/claude', createProxyMiddleware({
     if (req.headers['anthropic-beta']) {
       proxyReq.setHeader('anthropic-beta', req.headers['anthropic-beta']);
       console.log('Setting anthropic-beta header for PDF support:', req.headers['anthropic-beta']);
+    }
+    
+    // Add the direct browser access header
+    if (req.headers['anthropic-dangerous-direct-browser-access']) {
+      proxyReq.setHeader('anthropic-dangerous-direct-browser-access', 'true');
+      console.log('Setting anthropic-dangerous-direct-browser-access header');
+    } else {
+      proxyReq.setHeader('anthropic-dangerous-direct-browser-access', 'true');
+      console.log('Setting default anthropic-dangerous-direct-browser-access header');
     }
     
     // Content type is critical
@@ -149,12 +168,33 @@ app.use('/api/claude', createProxyMiddleware({
     // Add CORS headers to response
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, x-api-key, anthropic-version, anthropic-beta');
+    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, x-api-key, anthropic-version, anthropic-beta, anthropic-dangerous-direct-browser-access');
     
     // Make sure we're setting the right content type
     if (proxyRes.headers['content-type']) {
       res.setHeader('Content-Type', proxyRes.headers['content-type']);
       console.log('Setting Content-Type header in response:', proxyRes.headers['content-type']);
+    }
+    
+    // For gateway errors (502, 503, 504), provide more detailed error information
+    if (proxyRes.statusCode === 502 || proxyRes.statusCode === 503 || proxyRes.statusCode === 504) {
+      console.log(`Received ${proxyRes.statusCode} from upstream server`);
+      res.setHeader('Content-Type', 'application/json');
+      
+      // Replace the error response with more helpful information
+      const errorJson = JSON.stringify({
+        error: {
+          type: 'gateway_error',
+          message: `Received ${proxyRes.statusCode} Gateway Error from upstream server. This usually indicates a temporary issue with the API service. Please try again in a few moments.`,
+          status: proxyRes.statusCode,
+          cloud_environment: isCloudEnvironment ? 'yes' : 'no',
+          platform: process.env.RENDER ? 'Render.com' : (process.env.DIGITALOCEAN_APP ? 'DigitalOcean' : 'Unknown')
+        }
+      });
+      
+      res.end(errorJson);
+      console.log('Returning custom error response:', errorJson);
+      return;
     }
     
     // Collect the response body for logging, especially on errors
@@ -185,10 +225,12 @@ app.use('/api/claude', createProxyMiddleware({
           res.setHeader('Content-Type', 'application/json');
           
           const errorResponseJson = JSON.stringify({
-            error: 'CORS error',
-            message: 'Received HTML instead of JSON from the API server. This likely indicates a CORS or authentication issue.',
-            statusCode: proxyRes.statusCode,
-            htmlPreview: responseBody.substring(0, 500) + '...'
+            error: {
+              type: 'html_response',
+              message: 'Received HTML instead of JSON from the API server. This likely indicates a CORS or authentication issue.',
+              statusCode: proxyRes.statusCode,
+              htmlPreview: responseBody.substring(0, 500) + '...'
+            }
           });
           
           console.log('Replacing HTML response with JSON error:', errorResponseJson);
@@ -202,6 +244,22 @@ app.use('/api/claude', createProxyMiddleware({
         
         // Validate that the response can be parsed as JSON
         try {
+          if (responseBody.trim() === '') {
+            console.error('Response is empty despite content-type');
+            
+            // Replace the empty response with a clear error
+            res.statusCode = 502;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({
+              error: {
+                type: 'empty_response',
+                message: 'The API returned an empty response',
+                statusCode: proxyRes.statusCode
+              }
+            }));
+            return;
+          }
+          
           JSON.parse(responseBody);
           console.log('Successfully validated response as JSON');
         } catch (e) {
@@ -211,9 +269,12 @@ app.use('/api/claude', createProxyMiddleware({
           res.statusCode = 502;
           res.setHeader('Content-Type', 'application/json');
           res.end(JSON.stringify({
-            error: 'Invalid JSON',
-            message: 'The API returned an invalid JSON response',
-            response: responseBody.substring(0, 500) + '...'
+            error: {
+              type: 'invalid_json',
+              message: 'The API returned an invalid JSON response',
+              details: e.message,
+              responsePreview: responseBody.substring(0, 500) + '...'
+            }
           }));
           return;
         }
@@ -229,10 +290,14 @@ app.use('/api/claude', createProxyMiddleware({
     // Respond with JSON error instead of HTML
     res.setHeader('Content-Type', 'application/json');
     res.status(502).json({ 
-      error: 'Proxy error', 
-      message: err.message,
-      stack: err.stack,
-      timestamp: new Date().toISOString()
+      error: {
+        type: 'proxy_error',
+        message: err.message,
+        stack: err.stack,
+        timestamp: new Date().toISOString(),
+        cloud_environment: isCloudEnvironment ? 'yes' : 'no',
+        platform: process.env.RENDER ? 'Render.com' : (process.env.DIGITALOCEAN_APP ? 'DigitalOcean' : 'Unknown')
+      }
     });
     
     console.error('=== PROXY ERROR END ===');
@@ -280,7 +345,7 @@ if (isCloudEnvironment) {
   console.log('Using PORT from environment:', PORT);
 }
 
-// RENDER.COM SPECIFIC: Define all possible dist directory locations
+// Define all possible dist directory locations - IMPORTANT FOR RENDER.COM
 const possibleDistDirs = [
   path.join(__dirname, 'dist'),                 // Standard location
   path.join(__dirname, '..', 'dist'),           // One level up
@@ -288,22 +353,30 @@ const possibleDistDirs = [
   path.join(__dirname, 'build'),                // Alternative build folder name
   path.join(__dirname, '..', 'build'),          // Alternative in parent
   '/opt/render/project/src/dist',               // Render-specific location
+  '/opt/render/project/dist',                   // Alternative Render location
   '/var/task/dist',                             // Another possible Render location
   process.env.RENDER_PROJECT_DIR ? path.join(process.env.RENDER_PROJECT_DIR, 'dist') : null,
   process.env.RENDER_PROJECT_ROOT ? path.join(process.env.RENDER_PROJECT_ROOT, 'dist') : null,
   '/app/dist',                                  // Docker-style location
-  '/opt/render/project/dist',                   // Another Render-specific path
 ].filter(Boolean); // Filter out null/undefined paths
 
 // Find the first existing dist directory
 let distDir = null;
 for (const dir of possibleDistDirs) {
   console.log(`Checking for dist directory at: ${dir}`);
-  if (fs.existsSync(dir)) {
-    distDir = dir;
-    console.log(`✅ Found dist directory at: ${dir}`);
-    console.log(`Contents: ${fs.readdirSync(dir).join(', ')}`);
-    break;
+  try {
+    if (fs.existsSync(dir)) {
+      distDir = dir;
+      console.log(`✅ Found dist directory at: ${dir}`);
+      try {
+        console.log(`Contents: ${fs.readdirSync(dir).join(', ')}`);
+      } catch (err) {
+        console.log(`Error reading directory contents: ${err.message}`);
+      }
+      break;
+    }
+  } catch (err) {
+    console.log(`Error checking dir ${dir}: ${err.message}`);
   }
 }
 
@@ -324,7 +397,11 @@ if (!distDir) {
       if (fs.existsSync(path.join(__dirname, 'dist'))) {
         distDir = path.join(__dirname, 'dist');
         console.log(`✅ Emergency build succeeded! Dist directory: ${distDir}`);
-        console.log(`Contents: ${fs.readdirSync(distDir).join(', ')}`);
+        try {
+          console.log(`Contents: ${fs.readdirSync(distDir).join(', ')}`);
+        } catch (err) {
+          console.log(`Error reading directory contents: ${err.message}`);
+        }
       }
     }
   } catch (error) {
@@ -338,17 +415,46 @@ if (!distDir) {
   console.log('Current directory structure:');
   
   // Log current directory contents
-  console.log(`Contents of ${__dirname}:`, fs.readdirSync(__dirname));
+  try {
+    console.log(`Contents of ${__dirname}:`, fs.readdirSync(__dirname));
+  } catch (err) {
+    console.log(`Error reading ${__dirname}: ${err.message}`);
+  }
   
   // Try to log parent directory if possible
   const parentDir = path.join(__dirname, '..');
-  if (fs.existsSync(parentDir)) {
-    console.log(`Contents of parent (${parentDir}):`, fs.readdirSync(parentDir));
+  try {
+    if (fs.existsSync(parentDir)) {
+      console.log(`Contents of parent (${parentDir}):`, fs.readdirSync(parentDir));
+    }
+  } catch (err) {
+    console.log(`Error reading parent dir: ${err.message}`);
   }
   
   // Set a fallback directory to avoid crashing, even though it won't work properly
   distDir = path.join(__dirname, 'dist');
   console.warn('⚠️ Using fallback dist directory path, app will likely not function correctly');
+  
+  // Check for Render.com specific paths
+  if (process.env.RENDER) {
+    try {
+      console.log('Checking Render.com specific paths:');
+      const renderPaths = [
+        '/opt/render/project', 
+        '/opt/render', 
+        process.env.RENDER_PROJECT_DIR,
+        process.env.RENDER_PROJECT_ROOT
+      ].filter(Boolean);
+      
+      for (const rPath of renderPaths) {
+        if (fs.existsSync(rPath)) {
+          console.log(`Contents of ${rPath}:`, fs.readdirSync(rPath));
+        }
+      }
+    } catch (err) {
+      console.log('Error checking Render.com paths:', err.message);
+    }
+  }
 }
 
 // Serve static files from the dist directory
@@ -395,6 +501,22 @@ app.get('*', (req, res) => {
     `);
   }
 });
+
+// Update the Procfile to include the build step
+const procfilePath = path.join(__dirname, 'Procfile');
+if (fs.existsSync(procfilePath)) {
+  try {
+    const procfileContent = fs.readFileSync(procfilePath, 'utf8');
+    if (!procfileContent.includes('npm run build')) {
+      console.log('Updating Procfile to include build step...');
+      const updatedContent = `build: npm run build\nweb: node server.js\n`;
+      fs.writeFileSync(procfilePath, updatedContent);
+      console.log('✅ Procfile updated successfully.');
+    }
+  } catch (err) {
+    console.error('Error updating Procfile:', err.message);
+  }
+}
 
 // Universal server startup for both cloud and local environments
 const startServer = (port, fallbackPorts = []) => {
