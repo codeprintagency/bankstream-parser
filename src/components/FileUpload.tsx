@@ -2,15 +2,15 @@ import React, { useState, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
 import { Upload, FileText, Check, AlertCircle, Zap, Bug, Key } from "lucide-react";
-import { convertPdfToExcel, generateExcelFile, downloadExcelFile, Transaction } from "@/utils/fileConverter";
+import { convertPdfToExcel, generateExcelFile, downloadExcelFile, Transaction, extractTextFromPdf, prepareExtractedTextForAI } from "@/utils/fileConverter";
 import { parseTransactionsWithAI, hasPremiumAccess, togglePremiumAccess, getClaudeApiKey, setClaudeApiKey } from "@/utils/aiParser";
 import TransactionTable from "./TransactionTable";
-import { extractTextFromPdf } from "@/utils/fileConverter";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import DebugModal from "./DebugModal";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ApiService } from "@/utils/ApiService";
 
 const FileUpload: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
@@ -136,7 +136,7 @@ const FileUpload: React.FC = () => {
         
         toast({
           title: "AI Processing",
-          description: `Sending to Claude AI for analysis${directPdfUpload ? " using direct PDF upload" : ""}...`,
+          description: `Sending to Claude AI for analysis${directPdfUpload ? " using direct PDF upload" : " using text extraction"}...`,
         });
         
         let aiExtractedTransactions;
@@ -150,12 +150,21 @@ const FileUpload: React.FC = () => {
           aiExtractedTransactions = await parseTransactionsWithAI(arrayBuffer, currentApiKey);
         } else {
           // Text extraction approach
-          const extractedText = await extractTextFromPdf(file);
-          console.log("Using text extraction method, text length:", 
-            extractedText.reduce((sum, text) => sum + text.length, 0));
+          console.log("Using text extraction method");
+          const extractedItems = await extractTextFromPdf(file);
+          const extractedText = prepareExtractedTextForAI(extractedItems);
+          console.log("Extracted text from PDF, total pages:", extractedText.length);
           
-          // Use AI parsing with the extracted text
-          aiExtractedTransactions = await parseTransactionsWithAI(extractedText, currentApiKey);
+          // Use text-only API request options
+          const requestOptions = ApiService.prepareTextRequestOptions(extractedText);
+          console.log("Prepared text-only request for Claude");
+          
+          // Make the API request directly with text content
+          const apiResponse = await ApiService.callClaudeApi(currentApiKey, requestOptions);
+          console.log("Received API response from Claude");
+          
+          // Parse the Claude response to extract transactions
+          aiExtractedTransactions = await parseTransactionsWithAI(extractedText, currentApiKey, false);
         }
         
         setTransactions(aiExtractedTransactions);

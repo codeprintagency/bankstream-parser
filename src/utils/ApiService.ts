@@ -76,7 +76,13 @@ export class ApiService {
       
       const requestPayload = JSON.stringify(options);
       console.log("Request payload size:", requestPayload.length, "bytes");
-      console.log("Request headers:", JSON.stringify(headers, null, 2));
+      
+      // Only log headers without the API key for security
+      const sanitizedHeaders = {...headers};
+      if (sanitizedHeaders["x-api-key"]) {
+        sanitizedHeaders["x-api-key"] = sanitizedHeaders["x-api-key"].substring(0, 10) + "...";
+      }
+      console.log("Request headers:", JSON.stringify(sanitizedHeaders, null, 2));
       
       try {
         // Make the request through our proxy
@@ -165,6 +171,31 @@ export class ApiService {
   // Get the last raw response for debugging
   static getLastRawResponse(): string {
     return this.lastRawResponse;
+  }
+
+  // Prepare Claude API options for text-only requests (no PDF documents)
+  static prepareTextRequestOptions(extractedText: string[], model: string = "claude-3-opus-20240229"): ClaudeRequestOptions {
+    // Join the text from different pages with page markers
+    const formattedText = extractedText.map((pageText, index) => 
+      `--- PAGE ${index + 1} ---\n${pageText}`
+    ).join('\n\n');
+    
+    // Create a standard text request (no PDF documents)
+    return {
+      model: model,
+      max_tokens: 4000,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: `Please extract all financial transactions from this bank statement. Format each transaction with date, description, and amount. The statement text is:\n\n${formattedText}`
+            }
+          ]
+        }
+      ]
+    };
   }
 }
 

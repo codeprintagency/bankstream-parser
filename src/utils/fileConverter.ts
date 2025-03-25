@@ -56,3 +56,12 @@ export const convertPdfToExcel = async (file: File): Promise<Transaction[]> => {
     throw error;
   }
 };
+
+// Function to convert extracted PDF text to a format suitable for AI processing
+export const prepareExtractedTextForAI = (extractedItems: any[]): string[] => {
+  // Convert extracted items to simple text strings
+  return extractedItems.map(page => 
+    page.map((item: any) => item.str).join(' ')
+  );
+};
+

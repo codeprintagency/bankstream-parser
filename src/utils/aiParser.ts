@@ -1,277 +1,236 @@
-
-import { Transaction } from "./fileConverter";
-import { ApiService } from "./ApiService";
-
-// Default storage key for the API key (instead of hardcoding it)
-const CLAUDE_API_KEY_STORAGE = "claude_api_key";
-
-// Get the stored API key or return null if not set
-export const getClaudeApiKey = (): string | null => {
-  return localStorage.getItem(CLAUDE_API_KEY_STORAGE);
-};
-
-// Set the API key in storage
-export const setClaudeApiKey = (apiKey: string): void => {
-  if (!apiKey) {
-    localStorage.removeItem(CLAUDE_API_KEY_STORAGE);
-  } else {
-    localStorage.setItem(CLAUDE_API_KEY_STORAGE, apiKey);
-  }
-};
-
-// Check if a user has premium access
-export const hasPremiumAccess = (): boolean => {
-  // In a production app, this would check server-side subscription status
-  // For demonstration, we'll use localStorage
-  return localStorage.getItem('premium_access') === 'true';
-};
-
-// Toggle premium access (for demo purposes)
-export const togglePremiumAccess = (): boolean => {
-  const currentStatus = localStorage.getItem('premium_access') === 'true';
-  const newStatus = !currentStatus;
-  localStorage.setItem('premium_access', newStatus.toString());
-  return newStatus;
-};
-
-// Get the last HTML response for debugging
-export const getLastHtmlResponse = (): string => {
-  return ApiService.getLastRawResponse();
-};
-
-// Detect if running on DigitalOcean
-export const isRunningOnCloud = (): boolean => {
-  return window.location.hostname.includes('digitalocean.app') || 
-         window.location.hostname !== 'localhost';
-};
-
-// This function attempts to extract JSON from various formats (including malformed responses)
-function extractJsonFromResponse(responseText: string): any {
-  try {
-    // First try direct JSON parsing
-    return JSON.parse(responseText);
-  } catch (e) {
-    console.log("Failed direct JSON parsing, trying regex extraction");
-    
-    // If that fails, try to extract JSON using regex patterns
-    try {
-      // Try to find an array of objects
-      const jsonMatch = responseText.match(/\[\s*\{.*\}\s*\]/s);
-      if (jsonMatch) {
-        console.log("Found JSON array match using regex");
-        return JSON.parse(jsonMatch[0]);
-      }
-      
-      // Try to find a single JSON object
-      const objectMatch = responseText.match(/\{\s*".*"\s*:.+\}/s);
-      if (objectMatch) {
-        console.log("Found JSON object match using regex");
-        return JSON.parse(objectMatch[0]);
-      }
-      
-      // Try to look for markdown code blocks with JSON
-      const markdownMatch = responseText.match(/```(?:json)?\s*(\[.+\])\s*```/s);
-      if (markdownMatch && markdownMatch[1]) {
-        console.log("Found JSON in markdown code block");
-        return JSON.parse(markdownMatch[1]);
-      }
-    } catch (regexError) {
-      console.error("Failed to extract JSON using regex", regexError);
-    }
-    
-    // If all parsing attempts fail, throw error
-    throw new Error("Could not extract valid JSON from response. Response begins with: " + responseText.substring(0, 100));
+// For TypeScript's benefit, declare what's available in the browser's localStorage
+declare global {
+  interface Window {
+    localStorage: Storage;
   }
 }
 
-// Convert PDF content to base64 for Claude API
-export const pdfToBase64 = (pdfBuffer: ArrayBuffer): string => {
-  // Convert ArrayBuffer to Base64
-  const binary = new Uint8Array(pdfBuffer);
-  const bytes: string[] = [];
-  for (let i = 0; i < binary.byteLength; i++) {
-    bytes.push(String.fromCharCode(binary[i]));
-  }
-  return btoa(bytes.join(''));
-};
+import { Transaction } from './transactions/types';
+import { determineCategory } from './transactions/categoryDetector';
+import { ApiService } from './ApiService';
 
-// Parse transactions using Claude AI with support for PDF documents
-export const parseTransactionsWithAI = async (
-  pdfData: string[] | ArrayBuffer,
-  apiKey?: string
-): Promise<Transaction[]> => {
+// Constants for local storage keys
+const PREMIUM_ACCESS_KEY = 'premium_access';
+const CLAUDE_API_KEY = 'claude_api_key';
+
+/**
+ * Determines if premium access is enabled
+ */
+export function hasPremiumAccess(): boolean {
+  try {
+    return localStorage.getItem(PREMIUM_ACCESS_KEY) === 'true';
+  } catch (e) {
+    console.error('Error accessing localStorage:', e);
+    return false;
+  }
+}
+
+/**
+ * Toggles premium access state
+ */
+export function togglePremiumAccess(): boolean {
+  try {
+    const currentState = hasPremiumAccess();
+    const newState = !currentState;
+    localStorage.setItem(PREMIUM_ACCESS_KEY, newState.toString());
+    return newState;
+  } catch (e) {
+    console.error('Error accessing localStorage:', e);
+    return false;
+  }
+}
+
+/**
+ * Gets the Claude API key from localStorage
+ */
+export function getClaudeApiKey(): string | null {
+  try {
+    return localStorage.getItem(CLAUDE_API_KEY);
+  } catch (e) {
+    console.error('Error accessing localStorage:', e);
+    return null;
+  }
+}
+
+/**
+ * Sets the Claude API key in localStorage
+ */
+export function setClaudeApiKey(apiKey: string): void {
+  try {
+    localStorage.setItem(CLAUDE_API_KEY, apiKey);
+  } catch (e) {
+    console.error('Error accessing localStorage:', e);
+  }
+}
+
+/**
+ * Parses transactions from a bank statement using Claude AI
+ * 
+ * @param data - Either PDF data as ArrayBuffer or extracted text content
+ * @param apiKey - Claude API key
+ * @param isDirectPdfUpload - Whether we're uploading the raw PDF (true) or sending extracted text (false)
+ */
+export async function parseTransactionsWithAI(
+  data: ArrayBuffer | string[], 
+  apiKey: string,
+  isDirectPdfUpload: boolean = false
+): Promise<Transaction[]> {
   try {
     console.log("Starting AI parsing process");
     
-    // Get the API key from localStorage if not provided
-    const finalApiKey = apiKey || getClaudeApiKey();
+    let requestOptions;
     
-    if (!finalApiKey) {
-      throw new Error("No Claude API key provided. Please enter your API key in the settings.");
-    }
-    
-    let messages;
-    // Use Claude 3 Haiku as the default model - it's faster and cheaper
-    let modelToUse = "claude-3-haiku-20240307";
-    
-    // For cloud environments, we need to be more careful with PDF processing
-    const onCloud = isRunningOnCloud();
-    
-    // Check if we're receiving raw PDF data (ArrayBuffer) or extracted text
-    if (pdfData instanceof ArrayBuffer) {
+    if (isDirectPdfUpload && data instanceof ArrayBuffer) {
       console.log("Received raw PDF data, using document-based API call");
-      const base64Data = pdfToBase64(pdfData);
+      
+      // Convert ArrayBuffer to base64 for PDF upload
+      const bytes = new Uint8Array(data);
+      let binary = '';
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      const base64Data = btoa(binary);
       console.log("PDF converted to base64, size:", base64Data.length);
       
-      // Calculate PDF size for warnings
-      const pdfSizeMB = (base64Data.length * 0.75) / (1024 * 1024);
-      
-      // When sending PDFs directly, we need to use a model that supports PDFs
-      // Going with Claude 3 Opus for best PDF handling
-      modelToUse = "claude-3-opus-20240229";
-      
-      // On DigitalOcean, we might want to use a different model for larger PDFs
-      if (onCloud && pdfSizeMB > 1) {
-        console.log(`Running on cloud with PDF size ${pdfSizeMB.toFixed(2)}MB - using Claude 3 Opus for reliability`);
-      }
-      
-      messages = [
-        {
-          role: "user",
-          content: [
-            {
-              type: "document",
-              source: {
-                type: "base64",
-                media_type: "application/pdf",
-                data: base64Data
-              }
-            },
-            {
-              type: "text",
-              text: `
-                You are a financial data extraction specialist. I need you to extract ALL transactions from this bank statement PDF.
-                
-                Instructions:
-                1. Identify every transaction including the date, description, and amount
-                2. For descriptions with multiple lines, combine them into a single coherent description
-                3. Categorize each transaction (categories: Dining, Groceries, Transportation, Shopping, Bills, Entertainment, Health, Income, Transfer, Other)
-                4. Format amounts as numeric values (e.g., "51.60" not "$51.60")
-                5. Use MM/DD format for dates (e.g., "12/25")
-                6. Be thorough - capture EVERY transaction, even if the format is irregular
-                7. If amounts appear to be deposits or credits, include them with the correct sign
-                
-                VERY IMPORTANT: Format your response as a clean JSON array with NO explanations or other text before or after the JSON.
-                Each transaction should have these fields:
-                {
-                  "date": "MM/DD",
-                  "description": "Merchant name and details",
-                  "amount": "XX.XX",
-                  "category": "Category name"
+      // Create request with PDF document
+      requestOptions = {
+        model: "claude-3-opus-20240229",
+        max_tokens: 4000,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: "Please extract all financial transactions from this bank statement. Include date, description, and amount for each transaction."
+              },
+              {
+                type: "document",
+                source: {
+                  type: "base64",
+                  media_type: "application/pdf",
+                  data: base64Data
                 }
-              `
-            }
-          ]
-        }
-      ];
+              }
+            ]
+          }
+        ]
+      };
     } else {
-      // The full text from the PDF (text-based approach)
-      const fullText = pdfData.join('\n');
+      // Using text-only approach (either directly provided text or extraction)
+      console.log("Using text extraction approach for AI parsing");
       
-      // Prepare the prompt for Claude (text-based approach)
-      messages = [
-        {
-          role: "user",
-          content: `
-            You are a financial data extraction specialist. I need you to extract ALL transactions from the following bank statement text.
-            
-            Instructions:
-            1. Identify every transaction including the date, description, and amount
-            2. For descriptions with multiple lines, combine them into a single coherent description
-            3. Categorize each transaction (categories: Dining, Groceries, Transportation, Shopping, Bills, Entertainment, Health, Income, Transfer, Other)
-            4. Format amounts as numeric values (e.g., "51.60" not "$51.60")
-            5. Use MM/DD format for dates (e.g., "12/25")
-            6. Be thorough - capture EVERY transaction, even if the format is irregular
-            7. If amounts appear to be deposits or credits, include them with the correct sign
-            
-            VERY IMPORTANT: Format your response as a clean JSON array with NO explanations or other text before or after the JSON.
-            Each transaction should have these fields:
-            {
-              "date": "MM/DD",
-              "description": "Merchant name and details",
-              "amount": "XX.XX",
-              "category": "Category name"
-            }
-            
-            Here is the bank statement:
-            ${fullText.substring(0, 12000)}
-          `
-        }
-      ];
-    }
-
-    console.log("Sending request to Claude with API key:", finalApiKey.substring(0, 8) + "...");
-    console.log("Using model:", modelToUse);
-    
-    // Prepare request options
-    const options = {
-      model: modelToUse,
-      max_tokens: 4000,
-      messages
-    };
-    
-    // Call the Claude API
-    try {
-      const data = await ApiService.callClaudeApi(finalApiKey, options);
-      
-      console.log("Claude API response received");
-      
-      if (data && data.content && data.content[0] && data.content[0].text) {
-        const content = data.content[0].text;
-        console.log("Claude content preview:", content.substring(0, 200) + "...");
-        
-        // Try to parse the content as JSON or extract JSON from it
-        try {
-          const transactions: Transaction[] = extractJsonFromResponse(content);
-          console.log(`Parsed ${transactions.length} transactions from Claude response`);
-          return transactions;
-        } catch (jsonError) {
-          console.error('Could not parse JSON in Claude response', jsonError);
-          console.error('Claude response content:', content);
-          
-          throw new Error('Failed to parse JSON from Claude response. Check the debug info for details.');
-        }
+      if (Array.isArray(data)) {
+        // Use the helper method to prepare the text-only request
+        requestOptions = ApiService.prepareTextRequestOptions(data);
       } else {
-        console.error('Invalid Claude response structure:', data);
-        throw new Error('Invalid Claude response structure. Check the debug info for details.');
+        throw new Error("Invalid data format for text extraction approach");
       }
-    } catch (apiError: any) {
-      // Special handling for timeout errors on DigitalOcean
-      if (apiError.message?.includes('timeout') || 
-          apiError.message?.includes('504') || 
-          apiError.message?.includes('Gateway') || 
-          apiError.message?.includes('timed out')) {
-        
-        if (pdfData instanceof ArrayBuffer) {
-          throw new Error(
-            "The PDF processing timed out on DigitalOcean. Please try using the 'Text Extraction' method instead " +
-            "of 'Direct PDF Upload' by toggling the switch under 'AI Parsing'."
-          );
-        } else {
-          throw new Error(
-            "Request timed out. This usually happens with larger PDFs or when the server is busy. " +
-            "Please try again or use a smaller PDF."
-          );
-        }
-      }
-      
-      // Re-throw the original error
-      throw apiError;
     }
-  } catch (error: any) {
-    console.error('Error parsing with AI:', error);
     
-    // Throw with a better error message
-    throw new Error(`${error.message || 'Unknown error occurred while parsing with AI'}`);
+    console.log("Sending request to Claude with API key:", apiKey.substring(0, 10) + "...");
+    console.log("Using model:", requestOptions.model);
+    
+    // Make the API request
+    const response = await ApiService.callClaudeApi(apiKey, requestOptions);
+    
+    if (!response || !response.content || !response.content.length) {
+      throw new Error("Invalid response from Claude AI");
+    }
+    
+    const aiResponse = response.content[0].text;
+    console.log("Received response from Claude AI");
+    
+    // Parse the AI response to extract transaction data
+    return parseAIResponseToTransactions(aiResponse);
+  } catch (error) {
+    console.error("Error parsing with AI:", error);
+    throw error;
   }
-};
+}
+
+/**
+ * Parses Claude AI response text into transaction objects
+ */
+function parseAIResponseToTransactions(aiResponse: string): Transaction[] {
+  const transactions: Transaction[] = [];
+  const lines = aiResponse.split('\n');
+  
+  // Pattern to match common transaction formats in AI response
+  const transactionPattern = /(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)\s+(.+?)\s+\$?(\d+\.\d{2}|\d+,\d{3}\.\d{2})/i;
+  
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    
+    // Skip lines that are likely headers or notes
+    if (line.includes('TRANSACTION') || line.includes('DATE') || line.includes('AMOUNT') ||
+        line.includes('----------') || line.includes('=======') || 
+        line.startsWith('#') || line.startsWith('*')) {
+      continue;
+    }
+    
+    const match = line.match(transactionPattern);
+    if (match) {
+      // Extract the date, description, amount
+      const [, date, description, amount] = match;
+      
+      // Clean up the amount (remove commas and keep only numbers)
+      const cleanAmount = amount.replace(/[$,]/g, '');
+      
+      // Create a transaction object
+      const transaction: Transaction = {
+        date,
+        description: description.trim(),
+        amount: cleanAmount,
+        category: determineCategory(description)
+      };
+      
+      transactions.push(transaction);
+    }
+  }
+  
+  // If no transactions were extracted, try with a more lenient approach
+  if (transactions.length === 0) {
+    console.log("No transactions found with strict pattern, trying lenient parsing");
+    
+    // Look for date patterns
+    const datePattern = /(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)/;
+    const amountPattern = /\$?(\d+\.\d{2}|\d+,\d{3}\.\d{2})/;
+    
+    for (const line of lines) {
+      if (!line.trim() || line.length < 10) continue;
+      
+      const dateMatch = line.match(datePattern);
+      const amountMatch = line.match(amountPattern);
+      
+      if (dateMatch && amountMatch) {
+        const date = dateMatch[1];
+        const amount = amountMatch[1].replace(/[$,]/g, '');
+        
+        // Extract description (everything between date and amount)
+        let description = line.substring(
+          line.indexOf(dateMatch[0]) + dateMatch[0].length,
+          line.lastIndexOf(amountMatch[0])
+        ).trim();
+        
+        // If description is empty or too short, use the rest of the line
+        if (description.length < 3) {
+          description = line.replace(dateMatch[0], '').replace(amountMatch[0], '').trim();
+        }
+        
+        // Create a transaction object
+        const transaction: Transaction = {
+          date,
+          description: description,
+          amount: amount,
+          category: determineCategory(description)
+        };
+        
+        transactions.push(transaction);
+      }
+    }
+  }
+  
+  console.log(`Extracted ${transactions.length} transactions from AI response`);
+  return transactions;
+}
