@@ -1,4 +1,3 @@
-
 /**
  * Service for making API requests to Claude AI
  */
@@ -33,7 +32,7 @@ export class ApiService {
       const timestamp = new Date().getTime();
       
       // Use the proxy URL for all requests - crucial for CORS
-      // This will work both on localhost and when deployed to DigitalOcean
+      // This will work both on localhost and when deployed to cloud providers
       // Get the current URL's port if we're in a browser environment
       let apiUrl = `/api/claude/v1/messages?_t=${timestamp}`;
       
@@ -47,8 +46,9 @@ export class ApiService {
         console.log("PDF document size:", estimatePdfSize(options));
       }
       
-      // Set longer timeout for PDF processing - increased for DigitalOcean environments
-      const isCloudEnvironment = window.location.hostname.includes('digitalocean.app') || 
+      // Set longer timeout for PDF processing - increased for cloud environments
+      const isCloudEnvironment = window.location.hostname.includes('.onrender.com') || 
+                                window.location.hostname.includes('.digitalocean.app') || 
                                 window.location.hostname !== 'localhost';
       const pdfTimeout = isCloudEnvironment ? 240000 : 90000; // 4 minutes for cloud, 1.5 minutes for local
       const regularTimeout = isCloudEnvironment ? 90000 : 45000; // 1.5 minutes for cloud, 45s for local
@@ -115,13 +115,15 @@ export class ApiService {
           responseText.includes('<body>');
         
         if (isHtml) {
-          // Check if it's the DigitalOcean timeout page
+          // Check if it's a cloud provider timeout page
           if (responseText.includes('upstream_reset_before_response_started') || 
               responseText.includes('upstream_connect_timeout') ||
+              responseText.includes('Request Timeout') ||
+              responseText.includes('Gateway Timeout') ||
               response.status === 504 || 
               response.status === 503 || 
               response.status === 502) {
-            console.error("Gateway timeout from DigitalOcean. The PDF processing request took too long.");
+            console.error("Gateway timeout from cloud provider. The PDF processing request took too long.");
             throw new Error("Gateway timeout. PDF processing is taking too long. Please use text extraction instead of direct PDF upload.");
           } else {
             console.error("Received HTML instead of JSON from API:", responseText.substring(0, 500));
@@ -129,6 +131,7 @@ export class ApiService {
           }
         }
         
+        // Error handling and response parsing
         if (!response.ok) {
           let errorMessage = `API error: ${response.status}`;
           

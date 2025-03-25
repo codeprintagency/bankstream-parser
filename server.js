@@ -42,9 +42,10 @@ app.use((req, res, next) => {
   next();
 });
 
-// Detect if we're running in a cloud environment (like DigitalOcean)
+// Detect if we're running in a cloud environment (like Render.com or DigitalOcean)
 const isCloudEnvironment = !!process.env.CLOUD_ENVIRONMENT || 
                           !!process.env.DIGITALOCEAN_APP || 
+                          !!process.env.RENDER || 
                           process.env.NODE_ENV === 'production';
 
 // Improved proxy middleware for Claude API with better error handling and extended timeout
@@ -55,7 +56,7 @@ app.use('/api/claude', createProxyMiddleware({
     '^/api/claude': ''
   },
   logLevel: 'debug',
-  // Increase timeouts for PDF processing - critical fix for DigitalOcean
+  // Increase timeouts for PDF processing - critical fix for cloud environments
   timeout: isCloudEnvironment ? 120000 : 60000, // 2 minutes for cloud, 1 minute for local
   proxyTimeout: isCloudEnvironment ? 120000 : 60000, // 2 minutes for cloud, 1 minute for local
   onProxyReq: (proxyReq, req, res) => {
@@ -258,11 +259,24 @@ function isPdfRequest(body) {
 if (isCloudEnvironment) {
   app.use((req, res, next) => {
     res.header('X-Powered-By', 'Bank Statement Parser');
-    res.header('X-Environment', 'DigitalOcean App Platform');
+    if (process.env.RENDER) {
+      res.header('X-Environment', 'Render.com');
+    } else if (process.env.DIGITALOCEAN_APP) {
+      res.header('X-Environment', 'DigitalOcean App Platform');
+    } else {
+      res.header('X-Environment', 'Cloud');
+    }
     next();
   });
   
-  console.log('Running in cloud environment (DigitalOcean App Platform)');
+  if (process.env.RENDER) {
+    console.log('Running on Render.com');
+    console.log('App URL: https://bankstream-parser.onrender.com');
+  } else if (process.env.DIGITALOCEAN_APP) {
+    console.log('Running on DigitalOcean App Platform');
+  } else {
+    console.log('Running in generic cloud environment');
+  }
   console.log('Using PORT from environment:', PORT);
 }
 
@@ -279,7 +293,11 @@ const startServer = (port, fallbackPorts = []) => {
   const server = app.listen(port, () => {
     console.log(`Server running on port ${port}`);
     if (isCloudEnvironment) {
-      console.log(`App is deployed to: ${process.env.APP_URL || 'https://lobster-app-ngj4w.ondigitalocean.app/'}`);
+      if (process.env.RENDER) {
+        console.log(`App is deployed to: https://bankstream-parser.onrender.com`);
+      } else {
+        console.log(`App is deployed to: ${process.env.APP_URL || 'https://lobster-app-ngj4w.ondigitalocean.app/'}`);
+      }
     } else {
       console.log(`To access the app, open: http://localhost:${port}`);
       console.log('Make sure to run this server with "node server.js" instead of using "npm run dev" separately');
