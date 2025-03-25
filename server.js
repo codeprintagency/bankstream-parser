@@ -1,11 +1,9 @@
+
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import fs from 'fs';
-import multer from 'multer';
-import { createReadStream } from 'fs';
-import FormData from 'form-data';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,14 +11,6 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 8080;
 const FALLBACK_PORTS = [8081, 8082, 8083, 8084, 8085];
-
-// Configure multer for file uploads
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 25 * 1024 * 1024, // 25MB - Claude's file size limit
-  },
-});
 
 // Debug middleware to log requests
 app.use((req, res, next) => {
@@ -67,79 +57,6 @@ console.log('Environment detection:', {
   isVercel: !!process.env.VERCEL,
   isCloudEnvironment,
   nodeEnv: process.env.NODE_ENV
-});
-
-// File upload endpoint to proxy to Claude Files API
-app.post('/api/claude/v1/files', upload.single('file'), async (req, res) => {
-  console.log('=== FILE UPLOAD REQUEST ===');
-  
-  if (!req.file) {
-    console.error('No file uploaded');
-    return res.status(400).json({
-      error: {
-        type: 'missing_file',
-        message: 'No file was uploaded'
-      }
-    });
-  }
-  
-  // Extract the API key from headers
-  const apiKey = req.headers['x-api-key'];
-  if (!apiKey) {
-    console.error('Missing x-api-key header');
-    return res.status(400).json({
-      error: {
-        type: 'auth_error',
-        message: 'Missing x-api-key header'
-      }
-    });
-  }
-  
-  console.log(`Uploading file: ${req.file.originalname}, size: ${req.file.size} bytes, mimetype: ${req.file.mimetype}`);
-  
-  try {
-    // Create a FormData instance
-    const formData = new FormData();
-    formData.append('file', req.file.buffer, {
-      filename: req.file.originalname,
-      contentType: req.file.mimetype,
-    });
-    formData.append('purpose', req.body.purpose || 'attachments');
-    
-    // Forward the request to Claude API
-    const claudeResponse = await fetch('https://api.anthropic.com/v1/files', {
-      method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': req.headers['anthropic-version'] || '2023-06-01',
-        ...formData.getHeaders()
-      },
-      body: formData,
-    });
-    
-    console.log('Claude Files API response status:', claudeResponse.status);
-    
-    // Get the response as text first (to debug any issues)
-    const responseText = await claudeResponse.text();
-    console.log('Response text sample:', responseText.substring(0, 200) + '...');
-    
-    // Set the response headers and status
-    res.status(claudeResponse.status);
-    res.setHeader('Content-Type', 'application/json');
-    
-    // Return the response
-    res.send(responseText);
-    
-  } catch (error) {
-    console.error('Error forwarding file to Claude:', error);
-    res.status(502).json({
-      error: {
-        type: 'proxy_error',
-        message: error.message,
-        stack: error.stack
-      }
-    });
-  }
 });
 
 // Add direct route handling for Claude API messages endpoint
