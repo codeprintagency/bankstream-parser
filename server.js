@@ -1,4 +1,3 @@
-
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -9,6 +8,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 8080;
+const FALLBACK_PORTS = [8081, 8082, 8083, 8084, 8085];
 
 // Debug middleware to log requests
 app.use((req, res, next) => {
@@ -253,9 +253,33 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
-// Start the server
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`To access the app, open: http://localhost:${PORT}`);
-  console.log('Make sure to run this server with "node server.js" instead of using "npm run dev" separately');
-});
+// Try to start the server on the primary port, falling back to alternatives if needed
+const startServer = (port, fallbackPorts = []) => {
+  const server = app.listen(port, () => {
+    console.log(`Server running on port ${port}`);
+    console.log(`To access the app, open: http://localhost:${port}`);
+    console.log('Make sure to run this server with "node server.js" instead of using "npm run dev" separately');
+  });
+
+  server.on('error', (error) => {
+    if (error.code === 'EADDRINUSE') {
+      console.log(`Port ${port} is already in use. Trying another port...`);
+      
+      if (fallbackPorts.length > 0) {
+        const nextPort = fallbackPorts.shift();
+        startServer(nextPort, fallbackPorts);
+      } else {
+        console.error('All ports are in use. Please close other applications or specify a different port.');
+        console.error('You can set a custom port with the PORT environment variable:');
+        console.error('PORT=9000 node server.js');
+        process.exit(1);
+      }
+    } else {
+      console.error('Server error:', error);
+      process.exit(1);
+    }
+  });
+};
+
+// Start the server with fallback ports
+startServer(PORT, FALLBACK_PORTS);
