@@ -53,7 +53,8 @@ export class ApiService {
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
         "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01"
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true" // Add this header for direct browser access
       };
       
       // Add the PDF beta header if we're dealing with documents
@@ -102,9 +103,20 @@ export class ApiService {
         }
         
         if (!response.ok) {
-          const errorMsg = `API error: ${response.status} - ${responseText}`;
-          console.error(errorMsg);
-          throw new Error(errorMsg);
+          let errorMessage = `API error: ${response.status}`;
+          
+          // Try to parse error message from response if possible
+          try {
+            const errorObj = JSON.parse(responseText);
+            if (errorObj.error) {
+              errorMessage += ` - ${errorObj.error.type || ''}: ${errorObj.error.message || 'Unknown error'}`;
+            }
+          } catch (e) {
+            errorMessage += ` - ${responseText.substring(0, 200)}`;
+          }
+          
+          console.error(errorMessage);
+          throw new Error(errorMessage);
         }
         
         // Try to parse the response as JSON

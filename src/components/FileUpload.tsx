@@ -1,14 +1,16 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
-import { Upload, FileText, Check, AlertCircle, Zap, Bug } from "lucide-react";
+import { Upload, FileText, Check, AlertCircle, Zap, Bug, Key } from "lucide-react";
 import { convertPdfToExcel, generateExcelFile, downloadExcelFile, Transaction } from "@/utils/fileConverter";
-import { parseTransactionsWithAI, hasPremiumAccess, togglePremiumAccess } from "@/utils/aiParser";
+import { parseTransactionsWithAI, hasPremiumAccess, togglePremiumAccess, getClaudeApiKey, setClaudeApiKey } from "@/utils/aiParser";
 import TransactionTable from "./TransactionTable";
 import { extractTextFromPdf } from "@/utils/fileConverter";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import DebugModal from "./DebugModal";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 const FileUpload: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
@@ -20,8 +22,35 @@ const FileUpload: React.FC = () => {
   const [directPdfUpload, setDirectPdfUpload] = useState(true); // Default to direct PDF upload
   const [isPremium, setIsPremium] = useState(() => hasPremiumAccess());
   const [debugModalOpen, setDebugModalOpen] = useState(false);
+  const [apiKeyPopoverOpen, setApiKeyPopoverOpen] = useState(false);
+  const [apiKey, setApiKey] = useState(() => getClaudeApiKey() || "");
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
+
+  // Load API key from storage on component mount
+  useEffect(() => {
+    const savedKey = getClaudeApiKey();
+    if (savedKey) {
+      setApiKey(savedKey);
+    }
+  }, []);
+
+  const handleSaveApiKey = () => {
+    if (apiKey.trim()) {
+      setClaudeApiKey(apiKey.trim());
+      setApiKeyPopoverOpen(false);
+      toast({
+        title: "API Key Saved",
+        description: "Your Claude API key has been saved securely.",
+      });
+    } else {
+      toast({
+        title: "API Key Required",
+        description: "Please enter a valid API key.",
+        variant: "destructive",
+      });
+    }
+  };
 
   const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -92,6 +121,19 @@ const FileUpload: React.FC = () => {
           return;
         }
         
+        // Check if API key is available
+        const currentApiKey = getClaudeApiKey();
+        if (!currentApiKey) {
+          setApiKeyPopoverOpen(true);
+          toast({
+            title: "API Key Required",
+            description: "Claude API key is required for AI parsing. Please enter your API key.",
+            variant: "destructive",
+          });
+          setIsConverting(false);
+          return;
+        }
+        
         toast({
           title: "AI Processing",
           description: `Sending to Claude AI for analysis${directPdfUpload ? " using direct PDF upload" : ""}...`,
@@ -105,7 +147,7 @@ const FileUpload: React.FC = () => {
           console.log("Using direct PDF upload method, file size:", arrayBuffer.byteLength);
           
           // Use AI parsing with the raw PDF data
-          aiExtractedTransactions = await parseTransactionsWithAI(arrayBuffer);
+          aiExtractedTransactions = await parseTransactionsWithAI(arrayBuffer, currentApiKey);
         } else {
           // Text extraction approach
           const extractedText = await extractTextFromPdf(file);
@@ -113,7 +155,7 @@ const FileUpload: React.FC = () => {
             extractedText.reduce((sum, text) => sum + text.length, 0));
           
           // Use AI parsing with the extracted text
-          aiExtractedTransactions = await parseTransactionsWithAI(extractedText);
+          aiExtractedTransactions = await parseTransactionsWithAI(extractedText, currentApiKey);
         }
         
         setTransactions(aiExtractedTransactions);
@@ -139,6 +181,13 @@ const FileUpload: React.FC = () => {
     } catch (error: any) {
       console.error("Conversion error:", error);
       setError(error.message || "Unknown error occurred");
+      
+      // Check if error is related to API key
+      if (error.message?.includes("API key") || error.message?.includes("authorization") || 
+          error.message?.includes("auth") || error.message?.includes("unauthorized") ||
+          error.message?.toLowerCase().includes("token")) {
+        setApiKeyPopoverOpen(true);
+      }
       
       toast({
         title: "Conversion Failed",
@@ -207,6 +256,42 @@ const FileUpload: React.FC = () => {
           </div>
           
           <div className="flex items-center space-x-2">
+            <Popover open={apiKeyPopoverOpen} onOpenChange={setApiKeyPopoverOpen}>
+              <PopoverTrigger asChild>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  className="flex items-center gap-1"
+                >
+                  <Key className="w-4 h-4" />
+                  <span>API Key</span>
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-80 p-4">
+                <div className="space-y-4">
+                  <h4 className="font-medium">Claude API Key</h4>
+                  <p className="text-sm text-muted-foreground">
+                    Enter your Claude API key to use AI parsing features.
+                    Keys are stored locally in your browser.
+                  </p>
+                  <div className="flex flex-col gap-2">
+                    <Input
+                      type="password"
+                      placeholder="sk-ant-api03-..."
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                    />
+                    <Button size="sm" onClick={handleSaveApiKey}>
+                      Save API Key
+                    </Button>
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-2">
+                    Need a key? <a href="https://console.anthropic.com/account/keys" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Get it from Anthropic Console</a>
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
+            
             <Button 
               variant="outline" 
               size="sm" 

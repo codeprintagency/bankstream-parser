@@ -1,9 +1,22 @@
-
 import { Transaction } from "./fileConverter";
 import { ApiService } from "./ApiService";
 
-// Default API key for Claude (provided by the user)
-const DEFAULT_CLAUDE_API_KEY = "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";
+// Default storage key for the API key (instead of hardcoding it)
+const CLAUDE_API_KEY_STORAGE = "claude_api_key";
+
+// Get the stored API key or return null if not set
+export const getClaudeApiKey = (): string | null => {
+  return localStorage.getItem(CLAUDE_API_KEY_STORAGE);
+};
+
+// Set the API key in storage
+export const setClaudeApiKey = (apiKey: string): void => {
+  if (!apiKey) {
+    localStorage.removeItem(CLAUDE_API_KEY_STORAGE);
+  } else {
+    localStorage.setItem(CLAUDE_API_KEY_STORAGE, apiKey);
+  }
+};
 
 // Check if a user has premium access
 export const hasPremiumAccess = (): boolean => {
@@ -78,10 +91,17 @@ export const pdfToBase64 = (pdfBuffer: ArrayBuffer): string => {
 // Parse transactions using Claude AI with support for PDF documents
 export const parseTransactionsWithAI = async (
   pdfData: string[] | ArrayBuffer,
-  apiKey: string = DEFAULT_CLAUDE_API_KEY
+  apiKey?: string
 ): Promise<Transaction[]> => {
   try {
     console.log("Starting AI parsing process");
+    
+    // Get the API key from localStorage if not provided
+    const finalApiKey = apiKey || getClaudeApiKey();
+    
+    if (!finalApiKey) {
+      throw new Error("No Claude API key provided. Please enter your API key in the settings.");
+    }
     
     let messages;
     // Use Claude 3 Haiku as the default model - it's faster and cheaper
@@ -172,7 +192,7 @@ export const parseTransactionsWithAI = async (
       ];
     }
 
-    console.log("Sending request to Claude with API key:", apiKey.substring(0, 8) + "...");
+    console.log("Sending request to Claude with API key:", finalApiKey.substring(0, 8) + "...");
     console.log("Using model:", modelToUse);
     
     // Prepare request options
@@ -183,7 +203,7 @@ export const parseTransactionsWithAI = async (
     };
     
     // Call the Claude API
-    const data = await ApiService.callClaudeApi(apiKey, options);
+    const data = await ApiService.callClaudeApi(finalApiKey, options);
     
     console.log("Claude API response received");
     

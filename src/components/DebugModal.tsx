@@ -1,11 +1,10 @@
-
 import React, { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { getLastHtmlResponse } from "@/utils/aiParser";
-import { AlertCircle, Bug, Code, Copy, ExternalLink, Terminal } from "lucide-react";
+import { getLastHtmlResponse, getClaudeApiKey } from "@/utils/aiParser";
+import { AlertCircle, Bug, Code, Copy, ExternalLink, Terminal, Key } from "lucide-react";
 
 interface DebugModalProps {
   open: boolean;
@@ -16,6 +15,7 @@ const DebugModal: React.FC<DebugModalProps> = ({ open, onOpenChange }) => {
   const [htmlResponse, setHtmlResponse] = useState<string>("");
   const [isHtml, setIsHtml] = useState<boolean>(false);
   const [copied, setCopied] = useState(false);
+  const [apiKeyStatus, setApiKeyStatus] = useState<"present" | "missing" | "invalid">("missing");
   
   useEffect(() => {
     if (open) {
@@ -27,6 +27,16 @@ const DebugModal: React.FC<DebugModalProps> = ({ open, onOpenChange }) => {
                 response.trim().startsWith('<html') || 
                 response.includes('<head>') || 
                 response.includes('<body>'));
+      
+      // Check API key status
+      const apiKey = getClaudeApiKey();
+      if (!apiKey) {
+        setApiKeyStatus("missing");
+      } else if (apiKey.startsWith("sk-ant-api")) {
+        setApiKeyStatus("present");
+      } else {
+        setApiKeyStatus("invalid");
+      }
     }
   }, [open]);
   
@@ -50,6 +60,33 @@ const DebugModal: React.FC<DebugModalProps> = ({ open, onOpenChange }) => {
               : "Showing the raw response from the API"}
           </DialogDescription>
         </DialogHeader>
+        
+        {/* API Key Status */}
+        {apiKeyStatus !== "present" && (
+          <div className="p-3 bg-red-50 border border-red-200 rounded-md flex items-start gap-2 text-red-700 mb-4">
+            <Key className="w-5 h-5 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-medium">API Key {apiKeyStatus === "missing" ? "Missing" : "Invalid"}</p>
+              <p className="text-sm mb-2">
+                {apiKeyStatus === "missing" 
+                  ? "No Claude API key has been provided. You need a valid API key to use Claude AI services."
+                  : "The provided API key doesn't appear to be valid. Claude API keys should start with 'sk-ant-api'."}
+              </p>
+              <p className="text-sm">
+                <strong>Solution:</strong> Click the "API Key" button in the top right corner of the app to enter a valid Claude API key.
+              </p>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="mt-2 text-red-700 border-red-200 hover:bg-red-100 flex items-center gap-1"
+                onClick={() => window.open("https://console.anthropic.com/account/keys", "_blank")}
+              >
+                <ExternalLink className="w-4 h-4" />
+                Get a Claude API Key
+              </Button>
+            </div>
+          </div>
+        )}
         
         {isHtml && (
           <div className="p-3 bg-amber-50 border border-amber-200 rounded-md flex items-start gap-2 text-amber-700 mb-4">
@@ -167,18 +204,29 @@ const DebugModal: React.FC<DebugModalProps> = ({ open, onOpenChange }) => {
                 <h3 className="text-lg font-medium">Common Claude API Issues & Solutions</h3>
                 
                 <div className="space-y-2 border-l-2 border-blue-300 pl-3">
-                  <h4 className="font-medium">1. Server Not Running Correctly</h4>
+                  <h4 className="font-medium">1. API Key Issues</h4>
+                  <p className="text-sm">Your Claude API key should start with <code>sk-ant-api</code>. Make sure you're using a valid API key from your Anthropic Console.</p>
+                  <p className="text-sm">If you're seeing authentication errors, your API key might be expired, revoked, or incorrect.</p>
+                  <div className="mt-2">
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="flex items-center gap-1"
+                      onClick={() => window.open("https://console.anthropic.com/account/keys", "_blank")}
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                      Manage API Keys
+                    </Button>
+                  </div>
+                </div>
+                
+                <div className="space-y-2 border-l-2 border-blue-300 pl-3">
+                  <h4 className="font-medium">2. Server Not Running Correctly</h4>
                   <p className="text-sm">Make sure you start the app with <code>node server.js</code> instead of just <code>npm run dev</code>. 
                   The server.js file includes a proxy that forwards requests to Claude's API and handles CORS issues for you.</p>
                   <div className="bg-gray-100 p-2 rounded text-xs font-mono mt-1">
                     <code>node server.js</code>
                   </div>
-                </div>
-                
-                <div className="space-y-2 border-l-2 border-blue-300 pl-3">
-                  <h4 className="font-medium">2. API Key Issues</h4>
-                  <p className="text-sm">Ensure your Claude API key is valid and has not expired. The API key should start with <code>sk-ant-api03-</code> for the latest Claude models.</p>
-                  <p className="text-sm">The API key must have permissions to use the Claude 3.5 Sonnet model for PDF processing.</p>
                 </div>
                 
                 <div className="space-y-2 border-l-2 border-blue-300 pl-3">
