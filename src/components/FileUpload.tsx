@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
@@ -19,12 +20,13 @@ const FileUpload: React.FC = () => {
   const [isConverted, setIsConverted] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [useAI, setUseAI] = useState(false);
-  const [directPdfUpload, setDirectPdfUpload] = useState(false); // Changed to false by default
+  const [directPdfUpload, setDirectPdfUpload] = useState(false); // Default is false
   const [isPremium, setIsPremium] = useState(() => hasPremiumAccess());
   const [debugModalOpen, setDebugModalOpen] = useState(false);
   const [apiKeyPopoverOpen, setApiKeyPopoverOpen] = useState(false);
   const [apiKey, setApiKey] = useState(() => getClaudeApiKey() || "");
   const [error, setError] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const { toast } = useToast();
 
   // Load API key from storage on component mount
@@ -107,6 +109,7 @@ const FileUpload: React.FC = () => {
     
     setIsConverting(true);
     setError(null);
+    setUploadProgress(null);
     
     try {
       if (useAI) {
@@ -134,20 +137,56 @@ const FileUpload: React.FC = () => {
           return;
         }
         
-        toast({
-          title: "AI Processing",
-          description: `Sending to Claude AI for analysis${directPdfUpload ? " using direct PDF upload" : " using text extraction"}...`,
-        });
-        
         let aiExtractedTransactions;
         
         if (directPdfUpload) {
-          // Direct PDF upload approach - send the raw PDF data
-          const arrayBuffer = await file.arrayBuffer();
-          console.log("Using direct PDF upload method, file size:", arrayBuffer.byteLength);
+          // Using direct file upload approach
+          toast({
+            title: "File Upload Started",
+            description: "Uploading PDF file to Claude AI...",
+          });
           
-          // Use AI parsing with the raw PDF data
-          aiExtractedTransactions = await parseTransactionsWithAI(arrayBuffer, currentApiKey);
+          try {
+            setUploadProgress(10);
+            // Upload the file to Claude's Files API through our proxy
+            const uploadResult = await ApiService.uploadPdfFile(file, currentApiKey);
+            setUploadProgress(50);
+            
+            toast({
+              title: "File Upload Complete",
+              description: "Processing PDF with Claude AI...",
+            });
+            
+            console.log("File uploaded, ID:", uploadResult.id);
+            
+            // Use the file_id to request transaction extraction
+            const requestOptions = ApiService.prepareFileRequestOptions(
+              uploadResult.id, 
+              "Extract all financial transactions from this bank statement. Format each transaction with date, description, and amount. Return the data in a well-structured format that can be easily parsed."
+            );
+            
+            setUploadProgress(70);
+            
+            // Make the API request with the file_id
+            const apiResponse = await ApiService.callClaudeApi(currentApiKey, requestOptions);
+            console.log("Received API response from Claude with file_id");
+            
+            // Parse the Claude response to extract transactions
+            aiExtractedTransactions = await parseTransactionsWithAI("", currentApiKey, false, apiResponse);
+            setUploadProgress(100);
+          } catch (error) {
+            console.error("Error using file upload method:", error);
+            toast({
+              title: "File Upload Failed",
+              description: `Error: ${error.message}. Falling back to text extraction.`,
+              variant: "destructive",
+            });
+            
+            // Fall back to text extraction method
+            const extractedItems = await extractTextFromPdf(file);
+            const extractedText = prepareExtractedTextForAI(extractedItems);
+            aiExtractedTransactions = await parseTransactionsWithAI(extractedText, currentApiKey);
+          }
         } else {
           // Text extraction approach
           console.log("Using text extraction method");
@@ -164,17 +203,21 @@ const FileUpload: React.FC = () => {
           console.log("Received API response from Claude");
           
           // Parse the Claude response to extract transactions
-          aiExtractedTransactions = await parseTransactionsWithAI(extractedText, currentApiKey, false);
+          aiExtractedTransactions = await parseTransactionsWithAI(extractedText, currentApiKey, false, apiResponse);
         }
         
-        setTransactions(aiExtractedTransactions);
-        
-        toast({
-          title: "AI Conversion Successful",
-          description: `${aiExtractedTransactions.length} transactions have been extracted from your statement`,
-        });
-        
-        setIsConverted(true);
+        if (aiExtractedTransactions && aiExtractedTransactions.length > 0) {
+          setTransactions(aiExtractedTransactions);
+          
+          toast({
+            title: "AI Conversion Successful",
+            description: `${aiExtractedTransactions.length} transactions have been extracted from your statement`,
+          });
+          
+          setIsConverted(true);
+        } else {
+          throw new Error("No transactions could be extracted from this statement. Please try a different file or method.");
+        }
       } else {
         // Use traditional parsing
         const extractedTransactions = await convertPdfToExcel(file);
@@ -205,6 +248,7 @@ const FileUpload: React.FC = () => {
       });
     } finally {
       setIsConverting(false);
+      setUploadProgress(null);
     }
   }, [file, toast, useAI, isPremium, directPdfUpload]);
 
@@ -387,6 +431,22 @@ const FileUpload: React.FC = () => {
             }
           </p>
           
+          {uploadProgress !== null && (
+            <div className="w-full max-w-md mb-4">
+              <div className="w-full bg-gray-200 h-2 rounded-full overflow-hidden">
+                <div 
+                  className="bg-blue-500 h-full transition-all duration-300"
+                  style={{ width: `${uploadProgress}%` }}
+                ></div>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                {uploadProgress < 50 ? "Uploading file..." : 
+                 uploadProgress < 90 ? "Processing with Claude AI..." : 
+                 "Finalizing results..."}
+              </p>
+            </div>
+          )}
+          
           {!file && !isConverted && !error && (
             <div className="relative">
               <Button 
@@ -413,7 +473,7 @@ const FileUpload: React.FC = () => {
               {isConverting ? "Converting..." : useAI ? 
                 (directPdfUpload ? "Convert with Direct PDF Upload" : "Convert with Text Extraction") 
                 : "Convert to Excel"}
-              {isConverting && (
+              {isConverting && !uploadProgress && (
                 <span className="absolute inset-0 flex items-center justify-center">
                   <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
                 </span>

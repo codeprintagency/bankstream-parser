@@ -1,4 +1,3 @@
-
 /**
  * Service for making API requests to Claude AI
  */
@@ -8,7 +7,7 @@ interface ClaudeRequestOptions {
   max_tokens: number;
   messages: {
     role: string;
-    content: string | Array<{type: string, text?: string, source?: any}>;
+    content: string | Array<{type: string, text?: string, source?: any, file_id?: string}>;
   }[];
 }
 
@@ -16,6 +15,54 @@ export class ApiService {
   // Storage for raw responses for debugging
   static lastRawResponse: string = '';
   static maxRetries: number = 2;
+  
+  // Upload a PDF file to Claude's Files API
+  static async uploadPdfFile(
+    file: File,
+    apiKey: string
+  ): Promise<{ id: string, name: string, type: string }> {
+    if (!apiKey) {
+      throw new Error("API key is required for file uploads");
+    }
+    
+    console.log(`Uploading file: ${file.name}, size: ${file.size} bytes, type: ${file.type}`);
+    
+    if (file.type !== "application/pdf") {
+      throw new Error("Only PDF files are supported");
+    }
+    
+    // Create FormData object for the file upload
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('purpose', 'attachments');
+    
+    try {
+      // Call our proxy endpoint for file uploads
+      const timestamp = new Date().getTime();
+      const uploadResponse = await fetch(`/api/claude/v1/files?_t=${timestamp}`, {
+        method: 'POST',
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01'
+        },
+        body: formData
+      });
+      
+      if (!uploadResponse.ok) {
+        const errorText = await uploadResponse.text();
+        console.error("File upload failed:", errorText);
+        throw new Error(`File upload failed: ${uploadResponse.status} ${uploadResponse.statusText}`);
+      }
+      
+      const uploadResult = await uploadResponse.json();
+      console.log("File uploaded successfully:", uploadResult);
+      
+      return uploadResult;
+    } catch (error) {
+      console.error("Error uploading file:", error);
+      throw new Error(`Error uploading file: ${error.message}`);
+    }
+  }
   
   // Make an API request directly to Claude API with the proper headers
   static async callClaudeApi(
@@ -301,6 +348,29 @@ export class ApiService {
             {
               type: "text",
               text: `Please extract all financial transactions from this bank statement. Format each transaction with date, description, and amount. The statement text is:\n\n${formattedText}`
+            }
+          ]
+        }
+      ]
+    };
+  }
+  
+  // Prepare Claude API options for file-based requests using file_id
+  static prepareFileRequestOptions(fileId: string, promptText: string = "Extract all financial transactions from this bank statement. Format each transaction with date, description, and amount.", model: string = "claude-3-haiku-20240307"): ClaudeRequestOptions {
+    return {
+      model: model,
+      max_tokens: 4000,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: promptText
+            },
+            {
+              type: "file",
+              file_id: fileId
             }
           ]
         }
