@@ -1,4 +1,3 @@
-
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -281,86 +280,75 @@ if (isCloudEnvironment) {
   console.log('Using PORT from environment:', PORT);
 }
 
-// Determine the correct static files directory
-let distDir = path.join(__dirname, 'dist');
+// RENDER.COM SPECIFIC: Define all possible dist directory locations
+const possibleDistDirs = [
+  path.join(__dirname, 'dist'),                 // Standard location
+  path.join(__dirname, '..', 'dist'),           // One level up
+  path.join(__dirname, '../..', 'dist'),        // Two levels up
+  path.join(__dirname, 'build'),                // Alternative build folder name
+  path.join(__dirname, '..', 'build'),          // Alternative in parent
+  '/opt/render/project/src/dist',               // Render-specific location
+  '/var/task/dist',                             // Another possible Render location
+  process.env.RENDER_PROJECT_DIR ? path.join(process.env.RENDER_PROJECT_DIR, 'dist') : null,
+  process.env.RENDER_PROJECT_ROOT ? path.join(process.env.RENDER_PROJECT_ROOT, 'dist') : null,
+  '/app/dist',                                  // Docker-style location
+  '/opt/render/project/dist',                   // Another Render-specific path
+].filter(Boolean); // Filter out null/undefined paths
 
-// Check if we're in Render.com's directory structure - more thorough path detection
-if (process.env.RENDER && !fs.existsSync(distDir)) {
-  console.log('Dist directory not found at:', distDir);
-  
-  // Try all possible locations on Render.com
-  const possiblePaths = [
-    path.join(__dirname, '..', 'dist'),
-    path.join(__dirname, '../..', 'dist'),
-    path.join(process.env.RENDER_PROJECT_DIR || '', 'dist'),
-    path.join(process.env.RENDER_PROJECT_ROOT || '', 'dist'),
-    '/opt/render/project/src/dist',
-    '/app/dist',
-    '/opt/render/project/dist',
-    path.join(__dirname, 'build')
-  ];
-  
-  for (const possiblePath of possiblePaths) {
-    console.log('Checking for dist at:', possiblePath);
-    if (fs.existsSync(possiblePath)) {
-      distDir = possiblePath;
-      console.log('Found dist directory at:', distDir);
-      break;
-    }
-  }
-  
-  // If still not found, try to build the app (emergency recovery)
-  if (!fs.existsSync(distDir) && fs.existsSync(path.join(__dirname, 'package.json'))) {
-    console.log('Attempting emergency build process...');
-    try {
-      const { execSync } = require('child_process');
-      execSync('npm run build', { stdio: 'inherit', cwd: __dirname });
-      console.log('Emergency build complete, checking for dist again');
-      
-      // Check if build created the dist directory
-      if (fs.existsSync(path.join(__dirname, 'dist'))) {
-        distDir = path.join(__dirname, 'dist');
-        console.log('Found dist directory after emergency build at:', distDir);
-      }
-    } catch (err) {
-      console.error('Emergency build failed:', err.message);
-    }
-  }
-  
-  // Log current directory structure to help with debugging
-  console.log('Current directory structure:');
-  try {
-    const dirContents = fs.readdirSync(__dirname);
-    console.log(`Contents of ${__dirname}:`, dirContents);
-    
-    // Check parent directory
-    const parentDir = path.join(__dirname, '..');
-    if (fs.existsSync(parentDir)) {
-      console.log(`Contents of ${parentDir}:`, fs.readdirSync(parentDir));
-      
-      // Check if there's a dist directory in the parent
-      const parentDistDir = path.join(parentDir, 'dist');
-      if (fs.existsSync(parentDistDir)) {
-        console.log(`Contents of ${parentDistDir}:`, fs.readdirSync(parentDistDir));
-      }
-    }
-  } catch (err) {
-    console.error('Error listing directory contents:', err.message);
+// Find the first existing dist directory
+let distDir = null;
+for (const dir of possibleDistDirs) {
+  console.log(`Checking for dist directory at: ${dir}`);
+  if (fs.existsSync(dir)) {
+    distDir = dir;
+    console.log(`✅ Found dist directory at: ${dir}`);
+    console.log(`Contents: ${fs.readdirSync(dir).join(', ')}`);
+    break;
   }
 }
 
-// Log whether the dist directory exists
-if (fs.existsSync(distDir)) {
-  console.log('✅ Static files directory found at:', distDir);
-  console.log('Directory contents:', fs.readdirSync(distDir));
-} else {
-  console.error('❌ WARNING: Static files directory not found at:', distDir);
-  console.error('Available files in current directory:', fs.readdirSync(__dirname));
+// Emergency build process if no dist directory is found
+if (!distDir) {
+  console.log('⚠️ No dist directory found! Attempting emergency build...');
   try {
-    console.error('Files in parent directory:', fs.readdirSync(path.join(__dirname, '..')));
-  } catch (err) {
-    console.error('Could not list parent directory:', err.message);
+    // Check if we can access npm and package.json
+    if (fs.existsSync(path.join(__dirname, 'package.json'))) {
+      console.log('Found package.json, attempting build...');
+      const { execSync } = require('child_process');
+      execSync('npm install && npm run build', {
+        stdio: 'inherit',
+        cwd: __dirname
+      });
+      
+      // Check if build created a dist directory
+      if (fs.existsSync(path.join(__dirname, 'dist'))) {
+        distDir = path.join(__dirname, 'dist');
+        console.log(`✅ Emergency build succeeded! Dist directory: ${distDir}`);
+        console.log(`Contents: ${fs.readdirSync(distDir).join(', ')}`);
+      }
+    }
+  } catch (error) {
+    console.error('❌ Emergency build failed:', error.message);
   }
+}
+
+// Log directory structure for debugging
+if (!distDir) {
+  console.error('❌ CRITICAL: No dist directory found after all attempts');
+  console.log('Current directory structure:');
+  
+  // Log current directory contents
+  console.log(`Contents of ${__dirname}:`, fs.readdirSync(__dirname));
+  
+  // Try to log parent directory if possible
+  const parentDir = path.join(__dirname, '..');
+  if (fs.existsSync(parentDir)) {
+    console.log(`Contents of parent (${parentDir}):`, fs.readdirSync(parentDir));
+  }
+  
+  // Set a fallback directory to avoid crashing, even though it won't work properly
+  distDir = path.join(__dirname, 'dist');
+  console.warn('⚠️ Using fallback dist directory path, app will likely not function correctly');
 }
 
 // Serve static files from the dist directory
@@ -376,20 +364,32 @@ app.get('*', (req, res) => {
     console.error('Could not find index.html at', indexPath);
     res.status(404).send(`
       <html>
-        <head><title>Application Error</title></head>
-        <body>
-          <h1>Application Error</h1>
-          <p>The application could not find the built files. Make sure the build process completed successfully.</p>
-          <p>Looking for: ${indexPath}</p>
-          <p>Current directory: ${__dirname}</p>
-          <p>Files in dist directory: ${
-            fs.existsSync(distDir) ? 
-            JSON.stringify(fs.readdirSync(distDir)) : 
-            'Directory not found'
-          }</p>
-          <p>Environment: ${process.env.RENDER ? 'Render.com' : 'Unknown'}</p>
-          <p>Node version: ${process.version}</p>
-          <p>DEBUG: All environment variables: ${JSON.stringify(Object.keys(process.env))}</p>
+        <head><title>Build Files Not Found</title></head>
+        <body style="font-family: system-ui, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px;">
+          <h1>Application Error: Build Files Not Found</h1>
+          <p>The application could not find the built files. This usually happens when the build process doesn't complete successfully or when the files are stored in an unexpected location.</p>
+          
+          <h2>Troubleshooting Information</h2>
+          <ul>
+            <li>Looking for: ${indexPath}</li>
+            <li>Current directory: ${__dirname}</li>
+            <li>Files in current directory: ${JSON.stringify(fs.readdirSync(__dirname))}</li>
+            <li>Environment: ${process.env.RENDER ? 'Render.com' : 'Unknown'}</li>
+            <li>Node version: ${process.version}</li>
+            <li>PORT: ${PORT}</li>
+            <li>All possible dist locations checked: ${JSON.stringify(possibleDistDirs)}</li>
+          </ul>
+          
+          <h2>Possible Solutions</h2>
+          <ol>
+            <li>Make sure your build command in the Render.com dashboard is set to <code>npm run build</code></li>
+            <li>Ensure the start command is set to <code>node server.js</code></li>
+            <li>Check that the build is completing successfully in the build logs</li>
+            <li>Verify that all dependencies are installed properly</li>
+          </ol>
+          
+          <hr />
+          <p><em>This error page was generated by the Node.js server at ${new Date().toISOString()}</em></p>
         </body>
       </html>
     `);
