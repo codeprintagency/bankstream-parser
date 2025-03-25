@@ -1,4 +1,3 @@
-
 /**
  * Service for making API requests to Claude AI
  */
@@ -27,10 +26,26 @@ export class ApiService {
     while (retryCount <= this.maxRetries) {
       try {
         console.log(`Making API request to Claude (attempt ${retryCount + 1}/${this.maxRetries + 1})`);
+        
+        // Validate request structure before sending
+        if (!options.messages || options.messages.length === 0) {
+          throw new Error("Request must include non-empty messages array");
+        }
+        
+        if (!options.model) {
+          throw new Error("Request must include model parameter");
+        }
+        
         console.log("Request details:", JSON.stringify({
           model: options.model,
           message_count: options.messages.length,
-          has_documents: isPdfRequest(options)
+          has_documents: isPdfRequest(options),
+          messages_structure: options.messages.map(m => ({
+            role: m.role,
+            content_type: Array.isArray(m.content) 
+              ? m.content.map(c => c.type).join(', ') 
+              : typeof m.content
+          }))
         }));
         
         // Add a timestamp to prevent caching
@@ -87,8 +102,20 @@ export class ApiService {
           console.log("Adding PDF beta header for document processing");
         }
         
-        const requestPayload = JSON.stringify(options);
+        // Create a deep copy of options to avoid mutating the original
+        const requestOptions = JSON.parse(JSON.stringify(options));
+        
+        // Ensure max_tokens is set
+        if (!requestOptions.max_tokens) {
+          requestOptions.max_tokens = 4000;
+          console.log("Adding default max_tokens: 4000");
+        }
+        
+        const requestPayload = JSON.stringify(requestOptions);
         console.log("Request payload size:", requestPayload.length, "bytes");
+        
+        // Log a sample of the request payload for debugging
+        console.log("Request payload sample:", requestPayload.substring(0, 200) + "...");
         
         // Only log headers without the API key for security
         const sanitizedHeaders = {...headers};

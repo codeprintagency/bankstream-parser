@@ -22,6 +22,7 @@ app.use((req, res, next) => {
 });
 
 // Body parser middleware - configure before CORS and other middleware
+// Increase limit for handling larger requests
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
@@ -56,6 +57,80 @@ console.log('Environment detection:', {
   isVercel: !!process.env.VERCEL,
   isCloudEnvironment,
   nodeEnv: process.env.NODE_ENV
+});
+
+// Add direct route handling for Claude API messages endpoint
+app.post('/api/claude/v1/messages', async (req, res) => {
+  console.log('=== DIRECT CLAUDE API REQUEST ===');
+  console.log('Request URL:', req.url);
+  console.log('Request Method:', req.method);
+  
+  // Log the request body - crucial for debugging
+  console.log('Request Body:', JSON.stringify(req.body, null, 2));
+  
+  // Verify that we have required fields
+  if (!req.body || !req.body.messages || !req.body.model) {
+    console.error('Missing required fields in request body');
+    return res.status(400).json({
+      error: {
+        type: 'invalid_request',
+        message: 'Request body must contain model and messages fields'
+      }
+    });
+  }
+  
+  console.log('Message count:', req.body.messages.length);
+  console.log('Model:', req.body.model);
+  
+  // Extract the API key from headers
+  const apiKey = req.headers['x-api-key'];
+  if (!apiKey) {
+    console.error('Missing x-api-key header');
+    return res.status(400).json({
+      error: {
+        type: 'auth_error',
+        message: 'Missing x-api-key header'
+      }
+    });
+  }
+  
+  try {
+    // Forward the request to Claude API
+    const claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': req.headers['anthropic-version'] || '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+        ...(req.headers['anthropic-beta'] && {'anthropic-beta': req.headers['anthropic-beta']})
+      },
+      body: JSON.stringify(req.body),
+    });
+    
+    console.log('Claude API response status:', claudeResponse.status);
+    
+    // Get the response as text first (to debug any issues)
+    const responseText = await claudeResponse.text();
+    console.log('Response text sample:', responseText.substring(0, 200) + '...');
+    
+    // Set the response headers and status
+    res.status(claudeResponse.status);
+    res.setHeader('Content-Type', 'application/json');
+    
+    // Return the response
+    res.send(responseText);
+    
+  } catch (error) {
+    console.error('Error forwarding request to Claude:', error);
+    res.status(502).json({
+      error: {
+        type: 'proxy_error',
+        message: error.message,
+        stack: error.stack
+      }
+    });
+  }
 });
 
 // Improved proxy middleware for Claude API with better error handling and extended timeout
@@ -116,11 +191,26 @@ app.use('/api/claude', createProxyMiddleware({
       Object.entries(proxyReq.getHeaders())
     ), null, 2));
     
-    // Log the request body if it exists
+    // Log the request body if it exists - CRITICAL for debugging
     if (req.body && Object.keys(req.body).length > 0) {
       const bodyData = JSON.stringify(req.body);
       console.log('Request body size:', bodyData.length, 'bytes');
       console.log('Request model:', req.body.model || 'not specified');
+      
+      // Add detailed logging of the messages structure without showing the entire content
+      if (req.body.messages) {
+        console.log('Messages structure:', req.body.messages.map(m => ({
+          role: m.role,
+          content_type: Array.isArray(m.content) 
+            ? m.content.map(c => c.type).join(', ') 
+            : typeof m.content,
+          content_length: typeof m.content === 'string' 
+            ? m.content.length 
+            : Array.isArray(m.content) ? m.content.length : 0
+        })));
+      } else {
+        console.warn('No messages array in request body');
+      }
       
       // Check if the request contains PDF document content
       const hasPdfContent = isPdfRequest(req.body);
@@ -156,6 +246,8 @@ app.use('/api/claude', createProxyMiddleware({
       // Write the body data
       proxyReq.write(bodyData);
       proxyReq.end();
+    } else {
+      console.error('REQUEST BODY IS EMPTY OR UNDEFINED - THIS IS LIKELY THE CAUSE OF THE 502 ERROR');
     }
     
     console.log('=== PROXY REQUEST END ===');
