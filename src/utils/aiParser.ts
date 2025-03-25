@@ -1,3 +1,4 @@
+
 // For TypeScript's benefit, declare what's available in the browser's localStorage
 declare global {
   interface Window {
@@ -12,6 +13,7 @@ import { ApiService } from './ApiService';
 // Constants for local storage keys
 const PREMIUM_ACCESS_KEY = 'premium_access';
 const CLAUDE_API_KEY = 'claude_api_key';
+const LAST_HTML_RESPONSE_KEY = 'last_html_response';
 
 /**
  * Determines if premium access is enabled
@@ -60,6 +62,31 @@ export function setClaudeApiKey(apiKey: string): void {
     localStorage.setItem(CLAUDE_API_KEY, apiKey);
   } catch (e) {
     console.error('Error accessing localStorage:', e);
+  }
+}
+
+/**
+ * Stores the last HTML response received from Claude API
+ * @param htmlResponse - The HTML response to store
+ */
+export function setLastHtmlResponse(htmlResponse: string): void {
+  try {
+    localStorage.setItem(LAST_HTML_RESPONSE_KEY, htmlResponse);
+  } catch (e) {
+    console.error('Error storing HTML response in localStorage:', e);
+  }
+}
+
+/**
+ * Gets the last HTML response stored in localStorage
+ * @returns The stored HTML response or empty string if none exists
+ */
+export function getLastHtmlResponse(): string {
+  try {
+    return localStorage.getItem(LAST_HTML_RESPONSE_KEY) || '';
+  } catch (e) {
+    console.error('Error retrieving HTML response from localStorage:', e);
+    return '';
   }
 }
 
@@ -131,18 +158,28 @@ export async function parseTransactionsWithAI(
     console.log("Sending request to Claude with API key:", apiKey.substring(0, 10) + "...");
     console.log("Using model:", requestOptions.model);
     
-    // Make the API request
-    const response = await ApiService.callClaudeApi(apiKey, requestOptions);
-    
-    if (!response || !response.content || !response.content.length) {
-      throw new Error("Invalid response from Claude AI");
+    try {
+      // Make the API request
+      const response = await ApiService.callClaudeApi(apiKey, requestOptions);
+      
+      if (!response || !response.content || !response.content.length) {
+        throw new Error("Invalid response from Claude AI");
+      }
+      
+      const aiResponse = response.content[0].text;
+      console.log("Received response from Claude AI");
+      
+      // Parse the AI response to extract transaction data
+      return parseAIResponseToTransactions(aiResponse);
+    } catch (error: any) {
+      // If the response contains HTML (likely due to CORS or proxy issues), save it for debugging
+      if (error.response && typeof error.response === 'string' && 
+          (error.response.includes('<!DOCTYPE html>') || error.response.includes('<html'))) {
+        setLastHtmlResponse(error.response);
+        console.error("Received HTML response instead of JSON. Check the Debug Modal for details.");
+      }
+      throw error;
     }
-    
-    const aiResponse = response.content[0].text;
-    console.log("Received response from Claude AI");
-    
-    // Parse the AI response to extract transaction data
-    return parseAIResponseToTransactions(aiResponse);
   } catch (error) {
     console.error("Error parsing with AI:", error);
     throw error;
