@@ -1,4 +1,3 @@
-
 import * as pdfjsLib from 'pdfjs-dist';
 
 // Set worker source for pdf.js
@@ -22,7 +21,8 @@ export async function extractTextFromPdf(file: File): Promise<any[]> {
       const pageItemsPromises = [];
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent({ normalizeWhitespace: true });
+        // Remove the 'normalizeWhitespace' property which is not recognized
+        const textContent = await page.getTextContent();
         pageItemsPromises.push(textContent.items);
       }
       

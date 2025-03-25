@@ -12,13 +12,9 @@ import { determineCategory } from './transactions/categoryDetector';
 import { generateExcelFile, downloadExcelFile } from './excel/excelExporter';
 
 // Re-export all the types and functions needed for public use
-export {
-  Transaction,
-  extractTextFromPdf,
-  determineCategory,
-  generateExcelFile,
-  downloadExcelFile
-};
+export { extractTextFromPdf, determineCategory, generateExcelFile, downloadExcelFile };
+// Use 'export type' for re-exporting types when 'isolatedModules' is enabled
+export type { Transaction };
 
 /**
  * Main function that converts a PDF file to transaction data
