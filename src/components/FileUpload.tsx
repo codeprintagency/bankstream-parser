@@ -19,7 +19,7 @@ const FileUpload: React.FC = () => {
   const [isConverted, setIsConverted] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [useAI, setUseAI] = useState(false);
-  const [directPdfUpload, setDirectPdfUpload] = useState(true); // Default to direct PDF upload
+  const [directPdfUpload, setDirectPdfUpload] = useState(false); // Changed to false by default
   const [isPremium, setIsPremium] = useState(() => hasPremiumAccess());
   const [debugModalOpen, setDebugModalOpen] = useState(false);
   const [apiKeyPopoverOpen, setApiKeyPopoverOpen] = useState(false);

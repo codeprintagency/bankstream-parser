@@ -47,11 +47,11 @@ export class ApiService {
         console.log("PDF document size:", estimatePdfSize(options));
       }
       
-      // Set longer timeout for PDF processing - increased from 45s to 2 minutes for cloud environments
+      // Set longer timeout for PDF processing - increased for DigitalOcean environments
       const isCloudEnvironment = window.location.hostname.includes('digitalocean.app') || 
                                 window.location.hostname !== 'localhost';
-      const pdfTimeout = isCloudEnvironment ? 180000 : 60000; // 3 minutes for cloud, 1 minute for local
-      const regularTimeout = isCloudEnvironment ? 60000 : 30000; // 1 minute for cloud, 30s for local
+      const pdfTimeout = isCloudEnvironment ? 240000 : 90000; // 4 minutes for cloud, 1.5 minutes for local
+      const regularTimeout = isCloudEnvironment ? 90000 : 45000; // 1.5 minutes for cloud, 45s for local
       
       const controller = new AbortController();
       const timeoutId = setTimeout(
@@ -110,9 +110,13 @@ export class ApiService {
         
         if (isHtml) {
           // Check if it's the DigitalOcean timeout page
-          if (responseText.includes('upstream_reset_before_response_started') || response.status === 504) {
+          if (responseText.includes('upstream_reset_before_response_started') || 
+              responseText.includes('upstream_connect_timeout') ||
+              response.status === 504 || 
+              response.status === 503 || 
+              response.status === 502) {
             console.error("Gateway timeout from DigitalOcean. The PDF processing request took too long.");
-            throw new Error("Gateway timeout. PDF processing is taking too long. Try again with a smaller PDF or use text extraction instead.");
+            throw new Error("Gateway timeout. PDF processing is taking too long. Please use text extraction instead of direct PDF upload.");
           } else {
             console.error("Received HTML instead of JSON from API:", responseText.substring(0, 500));
             throw new Error("Received HTML instead of JSON. This usually happens due to CORS issues or server misconfiguration.");
@@ -147,7 +151,7 @@ export class ApiService {
         }
       } catch (fetchError: any) {
         if (fetchError.name === 'AbortError') {
-          throw new Error("Request timed out. PDF processing can take longer on DigitalOcean. Try with text extraction instead of direct PDF upload.");
+          throw new Error("Request timed out. Please try again with text extraction instead of direct PDF upload.");
         }
         throw fetchError;
       }
