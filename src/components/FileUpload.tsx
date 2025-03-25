@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { toast } from 'react-hot-toast';
+import { toast } from "@/hooks/use-toast";
 import { useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { useDropzone } from 'react-dropzone';
@@ -85,19 +85,30 @@ const FileUpload: React.FC<FileUploadProps> = ({ setExtractionProgress }) => {
       // Get the API key from localStorage
       const apiKey = localStorage.getItem('claude-api-key') || '';
       if (!apiKey) {
-        toast.error('Please enter your Claude API key in the settings');
+        toast({
+          title: "API Key Missing",
+          description: "Please enter your Claude API key in the settings",
+          variant: "destructive"
+        });
         setIsLoading(false);
         return;
       }
 
       if (!selectedFile) {
-        toast.error('Please select a file first');
+        toast({
+          title: "File Missing",
+          description: "Please select a file first",
+          variant: "destructive"
+        });
         setIsLoading(false);
         return;
       }
 
       // Create a toast notification for the upload process
-      toast.loading('Uploading file to Claude...');
+      toast({
+        title: "Processing",
+        description: "Uploading file to Claude...",
+      });
       setUploadStep('upload');
 
       // Upload the file to Claude via our proxy server
@@ -109,7 +120,10 @@ const FileUpload: React.FC<FileUploadProps> = ({ setExtractionProgress }) => {
         throw new Error('Failed to upload file: No file ID received');
       }
 
-      toast.success('File uploaded successfully!');
+      toast({
+        title: "Success",
+        description: "File uploaded successfully!",
+      });
       setUploadStep('processing');
       const fileId = fileUploadResponse.id;
       
@@ -133,13 +147,20 @@ const FileUpload: React.FC<FileUploadProps> = ({ setExtractionProgress }) => {
 
       // Update processing state
       setUploadStep('complete');
-      toast.success(`Successfully extracted ${extractedTransactions.length} transactions`);
+      toast({
+        title: "Extraction Complete", 
+        description: `Successfully extracted ${extractedTransactions.length} transactions`
+      });
       
       // Navigate to preview page
       navigate('/preview');
     } catch (error) {
       console.error('Error processing file:', error);
-      toast.error(`Error processing file: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      toast({
+        title: "Error",
+        description: `Error processing file: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        variant: "destructive"
+      });
       setUploadStep('error');
     } finally {
       setIsLoading(false);
