@@ -284,37 +284,75 @@ if (isCloudEnvironment) {
 // Determine the correct static files directory
 let distDir = path.join(__dirname, 'dist');
 
-// Check if we're in Render.com's directory structure
+// Check if we're in Render.com's directory structure - more thorough path detection
 if (process.env.RENDER && !fs.existsSync(distDir)) {
-  // Render.com uses a different directory structure
-  // Try the parent directory
   console.log('Dist directory not found at:', distDir);
-  distDir = path.join(__dirname, '..', 'dist');
-  console.log('Trying alternative path:', distDir);
   
-  if (!fs.existsSync(distDir)) {
-    // If still not found, try looking in other common locations
-    const possiblePaths = [
-      path.join(process.env.RENDER_PROJECT_DIR || '', 'dist'),
-      path.join(process.env.RENDER_PROJECT_ROOT || '', 'dist'),
-      '/opt/render/project/src/dist',
-      '/app/dist'
-    ];
+  // Try all possible locations on Render.com
+  const possiblePaths = [
+    path.join(__dirname, '..', 'dist'),
+    path.join(__dirname, '../..', 'dist'),
+    path.join(process.env.RENDER_PROJECT_DIR || '', 'dist'),
+    path.join(process.env.RENDER_PROJECT_ROOT || '', 'dist'),
+    '/opt/render/project/src/dist',
+    '/app/dist',
+    '/opt/render/project/dist',
+    path.join(__dirname, 'build')
+  ];
+  
+  for (const possiblePath of possiblePaths) {
+    console.log('Checking for dist at:', possiblePath);
+    if (fs.existsSync(possiblePath)) {
+      distDir = possiblePath;
+      console.log('Found dist directory at:', distDir);
+      break;
+    }
+  }
+  
+  // If still not found, try to build the app (emergency recovery)
+  if (!fs.existsSync(distDir) && fs.existsSync(path.join(__dirname, 'package.json'))) {
+    console.log('Attempting emergency build process...');
+    try {
+      const { execSync } = require('child_process');
+      execSync('npm run build', { stdio: 'inherit', cwd: __dirname });
+      console.log('Emergency build complete, checking for dist again');
+      
+      // Check if build created the dist directory
+      if (fs.existsSync(path.join(__dirname, 'dist'))) {
+        distDir = path.join(__dirname, 'dist');
+        console.log('Found dist directory after emergency build at:', distDir);
+      }
+    } catch (err) {
+      console.error('Emergency build failed:', err.message);
+    }
+  }
+  
+  // Log current directory structure to help with debugging
+  console.log('Current directory structure:');
+  try {
+    const dirContents = fs.readdirSync(__dirname);
+    console.log(`Contents of ${__dirname}:`, dirContents);
     
-    for (const possiblePath of possiblePaths) {
-      console.log('Checking for dist at:', possiblePath);
-      if (fs.existsSync(possiblePath)) {
-        distDir = possiblePath;
-        console.log('Found dist directory at:', distDir);
-        break;
+    // Check parent directory
+    const parentDir = path.join(__dirname, '..');
+    if (fs.existsSync(parentDir)) {
+      console.log(`Contents of ${parentDir}:`, fs.readdirSync(parentDir));
+      
+      // Check if there's a dist directory in the parent
+      const parentDistDir = path.join(parentDir, 'dist');
+      if (fs.existsSync(parentDistDir)) {
+        console.log(`Contents of ${parentDistDir}:`, fs.readdirSync(parentDistDir));
       }
     }
+  } catch (err) {
+    console.error('Error listing directory contents:', err.message);
   }
 }
 
 // Log whether the dist directory exists
 if (fs.existsSync(distDir)) {
   console.log('✅ Static files directory found at:', distDir);
+  console.log('Directory contents:', fs.readdirSync(distDir));
 } else {
   console.error('❌ WARNING: Static files directory not found at:', distDir);
   console.error('Available files in current directory:', fs.readdirSync(__dirname));
@@ -349,6 +387,9 @@ app.get('*', (req, res) => {
             JSON.stringify(fs.readdirSync(distDir)) : 
             'Directory not found'
           }</p>
+          <p>Environment: ${process.env.RENDER ? 'Render.com' : 'Unknown'}</p>
+          <p>Node version: ${process.version}</p>
+          <p>DEBUG: All environment variables: ${JSON.stringify(Object.keys(process.env))}</p>
         </body>
       </html>
     `);
