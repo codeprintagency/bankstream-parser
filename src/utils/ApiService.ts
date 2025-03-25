@@ -33,6 +33,7 @@ export class ApiService {
       const timestamp = new Date().getTime();
       
       // Use the proxy URL for all requests - crucial for CORS
+      // This will work both on localhost and when deployed to DigitalOcean
       const apiUrl = `/api/claude/v1/messages?_t=${timestamp}`;
       
       console.log("API URL:", apiUrl);

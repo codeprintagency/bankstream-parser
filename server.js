@@ -1,3 +1,4 @@
+
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -245,6 +246,23 @@ function isPdfRequest(body) {
   });
 }
 
+// Detect if we're running in a cloud environment (like DigitalOcean)
+const isCloudEnvironment = !!process.env.CLOUD_ENVIRONMENT || 
+                          !!process.env.DIGITALOCEAN_APP || 
+                          process.env.NODE_ENV === 'production';
+
+// Add environment information to response headers when in the cloud
+if (isCloudEnvironment) {
+  app.use((req, res, next) => {
+    res.header('X-Powered-By', 'Bank Statement Parser');
+    res.header('X-Environment', 'DigitalOcean App Platform');
+    next();
+  });
+  
+  console.log('Running in cloud environment (DigitalOcean App Platform)');
+  console.log('Using PORT from environment:', PORT);
+}
+
 // Serve static files from the dist directory
 app.use(express.static(path.join(__dirname, 'dist')));
 
@@ -253,33 +271,42 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
-// Try to start the server on the primary port, falling back to alternatives if needed
-const startServer = (port, fallbackPorts = []) => {
-  const server = app.listen(port, () => {
-    console.log(`Server running on port ${port}`);
-    console.log(`To access the app, open: http://localhost:${port}`);
-    console.log('Make sure to run this server with "node server.js" instead of using "npm run dev" separately');
+// Simplified server startup for cloud environments
+if (isCloudEnvironment) {
+  // In cloud environments, just use the assigned PORT
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+    console.log(`App is deployed to: ${process.env.APP_URL || 'https://lobster-app-ngj4w.ondigitalocean.app/'}`);
   });
+} else {
+  // For local development, use the port fallback mechanism
+  const startServer = (port, fallbackPorts = []) => {
+    const server = app.listen(port, () => {
+      console.log(`Server running on port ${port}`);
+      console.log(`To access the app, open: http://localhost:${port}`);
+      console.log('Make sure to run this server with "node server.js" instead of using "npm run dev" separately');
+    });
 
-  server.on('error', (error) => {
-    if (error.code === 'EADDRINUSE') {
-      console.log(`Port ${port} is already in use. Trying another port...`);
-      
-      if (fallbackPorts.length > 0) {
-        const nextPort = fallbackPorts.shift();
-        startServer(nextPort, fallbackPorts);
+    server.on('error', (error) => {
+      if (error.code === 'EADDRINUSE') {
+        console.log(`Port ${port} is already in use. Trying another port...`);
+        
+        if (fallbackPorts.length > 0) {
+          const nextPort = fallbackPorts.shift();
+          startServer(nextPort, fallbackPorts);
+        } else {
+          console.error('All ports are in use. Please close other applications or specify a different port.');
+          console.error('You can set a custom port with the PORT environment variable:');
+          console.error('PORT=9000 node server.js');
+          process.exit(1);
+        }
       } else {
-        console.error('All ports are in use. Please close other applications or specify a different port.');
-        console.error('You can set a custom port with the PORT environment variable:');
-        console.error('PORT=9000 node server.js');
+        console.error('Server error:', error);
         process.exit(1);
       }
-    } else {
-      console.error('Server error:', error);
-      process.exit(1);
-    }
-  });
-};
+    });
+  };
 
-// Start the server with fallback ports
-startServer(PORT, FALLBACK_PORTS);
+  // Start the server with fallback ports for local development
+  startServer(PORT, FALLBACK_PORTS);
+}
