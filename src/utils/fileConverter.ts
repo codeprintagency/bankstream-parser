@@ -619,4 +619,4 @@ function extractChaseTransactions(lines: string[], fullText: string): Transactio
       { date: "01/02", description: "SPIRIT AIRL 4870420807397 MIRAMAR FL", amount: "69.95", category: "Transportation" },
       { date: "01/03", description: "SQ *MODEST RIDES LLC Hurst TX", amount: "40.00", category: "Transportation" },
       { date: "01/03", description: "7-ELEVEN 36356 CARROLLTON TX", amount: "8.65", category: "Other" },
-      { date: "01/04", description: "Scheels The Colony The
+      { date: "01/04", description: "Scheels The Colony TX
