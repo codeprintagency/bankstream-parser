@@ -1,25 +1,23 @@
+
 import React, { useState } from 'react';
 import { toast } from "@/hooks/use-toast";
-import { useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { useDropzone } from 'react-dropzone';
 import { InboxOutlined } from '@ant-design/icons';
 import { Button, Upload } from 'antd';
 import ApiService from '../utils/ApiService';
-import { setUploadProgress } from '../store/actions';
 
 const { Dragger } = Upload;
 
 interface FileUploadProps {
-  setExtractionProgress: (progress: number) => void;
+  setExtractionProgress?: (progress: number) => void;
 }
 
-const FileUpload: React.FC<FileUploadProps> = ({ setExtractionProgress }) => {
+const FileUpload: React.FC<FileUploadProps> = ({ setExtractionProgress = () => {} }) => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStep, setUploadStep] = useState<'idle' | 'upload' | 'processing' | 'complete' | 'error'>('idle');
-  const dispatch = useDispatch();
   const navigate = useNavigate();
 
   // Function to upload file via the proxy server
@@ -139,11 +137,8 @@ const FileUpload: React.FC<FileUploadProps> = ({ setExtractionProgress }) => {
         setExtractionProgress(progress);
       });
 
-      // Update global state with the transactions
-      dispatch({
-        type: 'SET_TRANSACTIONS',
-        payload: extractedTransactions,
-      });
+      // Store transactions in localStorage instead of Redux
+      localStorage.setItem('transactions', JSON.stringify(extractedTransactions));
 
       // Update processing state
       setUploadStep('complete');
