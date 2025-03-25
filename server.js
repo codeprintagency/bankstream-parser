@@ -1,3 +1,4 @@
+
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -41,7 +42,12 @@ app.use((req, res, next) => {
   next();
 });
 
-// Improved proxy middleware for Claude API with better error handling
+// Detect if we're running in a cloud environment (like DigitalOcean)
+const isCloudEnvironment = !!process.env.CLOUD_ENVIRONMENT || 
+                          !!process.env.DIGITALOCEAN_APP || 
+                          process.env.NODE_ENV === 'production';
+
+// Improved proxy middleware for Claude API with better error handling and extended timeout
 app.use('/api/claude', createProxyMiddleware({
   target: 'https://api.anthropic.com',
   changeOrigin: true,
@@ -49,6 +55,9 @@ app.use('/api/claude', createProxyMiddleware({
     '^/api/claude': ''
   },
   logLevel: 'debug',
+  // Increase timeouts for PDF processing - critical fix for DigitalOcean
+  timeout: isCloudEnvironment ? 120000 : 60000, // 2 minutes for cloud, 1 minute for local
+  proxyTimeout: isCloudEnvironment ? 120000 : 60000, // 2 minutes for cloud, 1 minute for local
   onProxyReq: (proxyReq, req, res) => {
     console.log('=== PROXY REQUEST START ===');
     console.log('Original request URL:', req.url);
@@ -244,11 +253,6 @@ function isPdfRequest(body) {
     );
   });
 }
-
-// Detect if we're running in a cloud environment (like DigitalOcean)
-const isCloudEnvironment = !!process.env.CLOUD_ENVIRONMENT || 
-                          !!process.env.DIGITALOCEAN_APP || 
-                          process.env.NODE_ENV === 'production';
 
 // Add environment information to response headers when in the cloud
 if (isCloudEnvironment) {

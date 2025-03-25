@@ -1,3 +1,4 @@
+
 import { Transaction } from "./fileConverter";
 import { ApiService } from "./ApiService";
 
@@ -36,6 +37,12 @@ export const togglePremiumAccess = (): boolean => {
 // Get the last HTML response for debugging
 export const getLastHtmlResponse = (): string => {
   return ApiService.getLastRawResponse();
+};
+
+// Detect if running on DigitalOcean
+export const isRunningOnCloud = (): boolean => {
+  return window.location.hostname.includes('digitalocean.app') || 
+         window.location.hostname !== 'localhost';
 };
 
 // This function attempts to extract JSON from various formats (including malformed responses)
@@ -107,15 +114,26 @@ export const parseTransactionsWithAI = async (
     // Use Claude 3 Haiku as the default model - it's faster and cheaper
     let modelToUse = "claude-3-haiku-20240307";
     
+    // For cloud environments, we need to be more careful with PDF processing
+    const onCloud = isRunningOnCloud();
+    
     // Check if we're receiving raw PDF data (ArrayBuffer) or extracted text
     if (pdfData instanceof ArrayBuffer) {
       console.log("Received raw PDF data, using document-based API call");
       const base64Data = pdfToBase64(pdfData);
       console.log("PDF converted to base64, size:", base64Data.length);
       
+      // Calculate PDF size for warnings
+      const pdfSizeMB = (base64Data.length * 0.75) / (1024 * 1024);
+      
       // When sending PDFs directly, we need to use a model that supports PDFs
       // Going with Claude 3 Opus for best PDF handling
       modelToUse = "claude-3-opus-20240229";
+      
+      // On DigitalOcean, we might want to use a different model for larger PDFs
+      if (onCloud && pdfSizeMB > 1) {
+        console.log(`Running on cloud with PDF size ${pdfSizeMB.toFixed(2)}MB - using Claude 3 Opus for reliability`);
+      }
       
       messages = [
         {
@@ -203,28 +221,52 @@ export const parseTransactionsWithAI = async (
     };
     
     // Call the Claude API
-    const data = await ApiService.callClaudeApi(finalApiKey, options);
-    
-    console.log("Claude API response received");
-    
-    if (data && data.content && data.content[0] && data.content[0].text) {
-      const content = data.content[0].text;
-      console.log("Claude content preview:", content.substring(0, 200) + "...");
+    try {
+      const data = await ApiService.callClaudeApi(finalApiKey, options);
       
-      // Try to parse the content as JSON or extract JSON from it
-      try {
-        const transactions: Transaction[] = extractJsonFromResponse(content);
-        console.log(`Parsed ${transactions.length} transactions from Claude response`);
-        return transactions;
-      } catch (jsonError) {
-        console.error('Could not parse JSON in Claude response', jsonError);
-        console.error('Claude response content:', content);
+      console.log("Claude API response received");
+      
+      if (data && data.content && data.content[0] && data.content[0].text) {
+        const content = data.content[0].text;
+        console.log("Claude content preview:", content.substring(0, 200) + "...");
         
-        throw new Error('Failed to parse JSON from Claude response. Check the debug info for details.');
+        // Try to parse the content as JSON or extract JSON from it
+        try {
+          const transactions: Transaction[] = extractJsonFromResponse(content);
+          console.log(`Parsed ${transactions.length} transactions from Claude response`);
+          return transactions;
+        } catch (jsonError) {
+          console.error('Could not parse JSON in Claude response', jsonError);
+          console.error('Claude response content:', content);
+          
+          throw new Error('Failed to parse JSON from Claude response. Check the debug info for details.');
+        }
+      } else {
+        console.error('Invalid Claude response structure:', data);
+        throw new Error('Invalid Claude response structure. Check the debug info for details.');
       }
-    } else {
-      console.error('Invalid Claude response structure:', data);
-      throw new Error('Invalid Claude response structure. Check the debug info for details.');
+    } catch (apiError: any) {
+      // Special handling for timeout errors on DigitalOcean
+      if (apiError.message?.includes('timeout') || 
+          apiError.message?.includes('504') || 
+          apiError.message?.includes('Gateway') || 
+          apiError.message?.includes('timed out')) {
+        
+        if (pdfData instanceof ArrayBuffer) {
+          throw new Error(
+            "The PDF processing timed out on DigitalOcean. Please try using the 'Text Extraction' method instead " +
+            "of 'Direct PDF Upload' by toggling the switch under 'AI Parsing'."
+          );
+        } else {
+          throw new Error(
+            "Request timed out. This usually happens with larger PDFs or when the server is busy. " +
+            "Please try again or use a smaller PDF."
+          );
+        }
+      }
+      
+      // Re-throw the original error
+      throw apiError;
     }
   } catch (error: any) {
     console.error('Error parsing with AI:', error);
