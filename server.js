@@ -3,6 +3,7 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createProxyMiddleware } from 'http-proxy-middleware';
+import fs from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -280,12 +281,78 @@ if (isCloudEnvironment) {
   console.log('Using PORT from environment:', PORT);
 }
 
+// Determine the correct static files directory
+let distDir = path.join(__dirname, 'dist');
+
+// Check if we're in Render.com's directory structure
+if (process.env.RENDER && !fs.existsSync(distDir)) {
+  // Render.com uses a different directory structure
+  // Try the parent directory
+  console.log('Dist directory not found at:', distDir);
+  distDir = path.join(__dirname, '..', 'dist');
+  console.log('Trying alternative path:', distDir);
+  
+  if (!fs.existsSync(distDir)) {
+    // If still not found, try looking in other common locations
+    const possiblePaths = [
+      path.join(process.env.RENDER_PROJECT_DIR || '', 'dist'),
+      path.join(process.env.RENDER_PROJECT_ROOT || '', 'dist'),
+      '/opt/render/project/src/dist',
+      '/app/dist'
+    ];
+    
+    for (const possiblePath of possiblePaths) {
+      console.log('Checking for dist at:', possiblePath);
+      if (fs.existsSync(possiblePath)) {
+        distDir = possiblePath;
+        console.log('Found dist directory at:', distDir);
+        break;
+      }
+    }
+  }
+}
+
+// Log whether the dist directory exists
+if (fs.existsSync(distDir)) {
+  console.log('✅ Static files directory found at:', distDir);
+} else {
+  console.error('❌ WARNING: Static files directory not found at:', distDir);
+  console.error('Available files in current directory:', fs.readdirSync(__dirname));
+  try {
+    console.error('Files in parent directory:', fs.readdirSync(path.join(__dirname, '..')));
+  } catch (err) {
+    console.error('Could not list parent directory:', err.message);
+  }
+}
+
 // Serve static files from the dist directory
-app.use(express.static(path.join(__dirname, 'dist')));
+app.use(express.static(distDir));
 
 // Handle all routes by serving the index.html file
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+  const indexPath = path.join(distDir, 'index.html');
+  
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    console.error('Could not find index.html at', indexPath);
+    res.status(404).send(`
+      <html>
+        <head><title>Application Error</title></head>
+        <body>
+          <h1>Application Error</h1>
+          <p>The application could not find the built files. Make sure the build process completed successfully.</p>
+          <p>Looking for: ${indexPath}</p>
+          <p>Current directory: ${__dirname}</p>
+          <p>Files in dist directory: ${
+            fs.existsSync(distDir) ? 
+            JSON.stringify(fs.readdirSync(distDir)) : 
+            'Directory not found'
+          }</p>
+        </body>
+      </html>
+    `);
+  }
 });
 
 // Universal server startup for both cloud and local environments

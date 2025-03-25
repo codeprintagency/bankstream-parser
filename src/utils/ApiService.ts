@@ -47,9 +47,18 @@ export class ApiService {
       }
       
       // Set longer timeout for PDF processing - increased for cloud environments
-      const isCloudEnvironment = window.location.hostname.includes('.onrender.com') || 
-                                window.location.hostname.includes('.digitalocean.app') || 
+      const isRenderEnvironment = window.location.hostname.includes('.onrender.com');
+      const isDigitalOceanEnvironment = window.location.hostname.includes('.digitalocean.app');
+      const isCloudEnvironment = isRenderEnvironment || isDigitalOceanEnvironment || 
                                 window.location.hostname !== 'localhost';
+      
+      console.log("Environment detection:", {
+        isRenderEnvironment,
+        isDigitalOceanEnvironment,
+        isCloudEnvironment,
+        hostname: window.location.hostname
+      });
+      
       const pdfTimeout = isCloudEnvironment ? 240000 : 90000; // 4 minutes for cloud, 1.5 minutes for local
       const regularTimeout = isCloudEnvironment ? 90000 : 45000; // 1.5 minutes for cloud, 45s for local
       
