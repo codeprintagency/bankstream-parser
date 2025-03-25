@@ -1,3 +1,4 @@
+
 /**
  * Service for making API requests to Claude AI
  */
@@ -283,7 +284,7 @@ export class ApiService {
   }
 
   // Prepare Claude API options for text-only requests (no PDF documents)
-  static prepareTextRequestOptions(extractedText: string[], model: string = "claude-3-opus-20240229"): ClaudeRequestOptions {
+  static prepareTextRequestOptions(extractedText: string[], model: string = "claude-3-haiku-20240307"): ClaudeRequestOptions {
     // Join the text from different pages with page markers
     const formattedText = extractedText.map((pageText, index) => 
       `--- PAGE ${index + 1} ---\n${pageText}`
