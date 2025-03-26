@@ -24,12 +24,12 @@ async function buildProjects() {
         // Directory paths
         const root = __dirname;
         const shared = path.join(__dirname, 'shared');
-        const package = path.join(__dirname, 'packages/webxr');
+        const packageDir = path.join(__dirname, 'packages/webxr');
         
         console.log("Building projects...");
         console.log("Root directory:", root);
         console.log("Shared directory:", shared);
-        console.log("Package directory:", package);
+        console.log("Package directory:", packageDir);
         
         // Check if directories exist
         console.log("Checking if directories exist...");
@@ -41,7 +41,7 @@ async function buildProjects() {
             console.log("Contents of current directory:", fs.readdirSync(__dirname));
         }
         
-        if (fs.existsSync(package)) {
+        if (fs.existsSync(packageDir)) {
             console.log("Package directory exists");
         } else {
             console.log("Package directory does not exist");
@@ -58,14 +58,14 @@ async function buildProjects() {
         }
         
         // If shared and package directories exist, continue with the build process
-        if (fs.existsSync(shared) && fs.existsSync(package)) {
+        if (fs.existsSync(shared) && fs.existsSync(packageDir)) {
             // Install dependencies in shared directory
             console.log("Installing shared dependencies...");
             await runCommand('npm install', shared);
             
             // Install dependencies in the package directory
             console.log("Installing package dependencies...");
-            await runCommand('npm install', package);
+            await runCommand('npm install', packageDir);
             
             // Create npm link in shared
             console.log("Creating npm link for shared...");
@@ -73,11 +73,11 @@ async function buildProjects() {
             
             // Use the npm link in package
             console.log("Linking shared to package...");
-            await runCommand('npm link shared', package);
+            await runCommand('npm link shared', packageDir);
             
             // Run build with the npx prefix to ensure we use the local vite
             console.log("Building package...");
-            await runCommand('npx vite build', package);
+            await runCommand('npx vite build', packageDir);
             
             // Copy the built files to the root dist directory
             console.log("Copying built files to root dist directory...");
@@ -86,8 +86,8 @@ async function buildProjects() {
             }
             
             // Copy all files from package/dist to root/dist
-            if (fs.existsSync(path.join(package, 'dist'))) {
-                await runCommand(`cp -R ${path.join(package, 'dist')}/* ${path.join(root, 'dist')}`, root);
+            if (fs.existsSync(path.join(packageDir, 'dist'))) {
+                await runCommand(`cp -R ${path.join(packageDir, 'dist')}/* ${path.join(root, 'dist')}`, root);
                 console.log("Build files copied successfully!");
             } else {
                 console.error("Package dist directory not found!");
