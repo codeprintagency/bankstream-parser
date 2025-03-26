@@ -1,3 +1,3 @@
 
-build: npm run build
+build: node deploy.js
 web: node server.js
