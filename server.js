@@ -1,4 +1,3 @@
-
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -480,7 +479,7 @@ if (!distDir) {
     if (fs.existsSync(path.join(__dirname, 'package.json'))) {
       console.log('Found package.json, attempting build...');
       const { execSync } = require('child_process');
-      execSync('npm install && npm run build', {
+      execSync('npm install && npx vite build', {  // Use npx vite instead of npm run build
         stdio: 'inherit',
         cwd: __dirname
       });
@@ -593,22 +592,6 @@ app.get('*', (req, res) => {
     `);
   }
 });
-
-// Update the Procfile to include the build step
-const procfilePath = path.join(__dirname, 'Procfile');
-if (fs.existsSync(procfilePath)) {
-  try {
-    const procfileContent = fs.readFileSync(procfilePath, 'utf8');
-    if (!procfileContent.includes('npm run build')) {
-      console.log('Updating Procfile to include build step...');
-      const updatedContent = `build: npm run build\nweb: node server.js\n`;
-      fs.writeFileSync(procfilePath, updatedContent);
-      console.log('✅ Procfile updated successfully.');
-    }
-  } catch (err) {
-    console.error('Error updating Procfile:', err.message);
-  }
-}
 
 // Universal server startup for both cloud and local environments
 const startServer = (port, fallbackPorts = []) => {
