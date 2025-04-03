@@ -12,6 +12,8 @@ import { useToast } from "@/components/ui/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
+type UserRole = 'admin' | 'subscriber' | 'user';
+
 const Admin: React.FC = () => {
   const { user, isLoading, isAdmin, getToken } = useAuth();
   const { toast } = useToast();
@@ -23,7 +25,7 @@ const Admin: React.FC = () => {
   const [isLoadingApiKey, setIsLoadingApiKey] = useState(false);
   const [isSavingApiKey, setIsSavingApiKey] = useState(false);
   const [isUpdatingRole, setIsUpdatingRole] = useState(false);
-  const [userRoles, setUserRoles] = useState<Record<string, string>>({});
+  const [userRoles, setUserRoles] = useState<Record<string, UserRole>>({});
 
   useEffect(() => {
     if (isAdmin) {
@@ -57,30 +59,6 @@ const Admin: React.FC = () => {
       });
     } finally {
       setIsLoadingUsers(false);
-    }
-  };
-
-  const fetchUserRoles = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('user_roles')
-        .select('user_id, role');
-      
-      if (error) throw error;
-      
-      const roles: Record<string, string> = {};
-      (data || []).forEach((item) => {
-        roles[item.user_id] = item.role;
-      });
-      
-      setUserRoles(roles);
-    } catch (error: any) {
-      console.error("Error fetching user roles:", error);
-      toast({
-        title: "Error fetching user roles",
-        description: error.message,
-        variant: "destructive",
-      });
     }
   };
 
@@ -140,6 +118,30 @@ const Admin: React.FC = () => {
     }
   };
 
+  const fetchUserRoles = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('user_roles')
+        .select('user_id, role');
+      
+      if (error) throw error;
+      
+      const roles: Record<string, UserRole> = {};
+      (data || []).forEach((item) => {
+        roles[item.user_id] = item.role as UserRole;
+      });
+      
+      setUserRoles(roles);
+    } catch (error: any) {
+      console.error("Error fetching user roles:", error);
+      toast({
+        title: "Error fetching user roles",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleSaveClaudeApiKey = async () => {
     setIsSavingApiKey(true);
     try {
@@ -166,7 +168,7 @@ const Admin: React.FC = () => {
     }
   };
 
-  const updateUserRole = async (userId: string, role: string) => {
+  const updateUserRole = async (userId: string, role: UserRole) => {
     setIsUpdatingRole(true);
     try {
       // First check if the user already has a role
@@ -274,7 +276,7 @@ const Admin: React.FC = () => {
                             <TableCell>
                               <Select
                                 value={userRoles[user.id] || "user"}
-                                onValueChange={(value) => updateUserRole(user.id, value)}
+                                onValueChange={(value: UserRole) => updateUserRole(user.id, value)}
                                 disabled={isUpdatingRole}
                               >
                                 <SelectTrigger className="w-[180px]">
