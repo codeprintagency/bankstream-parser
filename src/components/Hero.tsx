@@ -28,24 +28,26 @@ const Hero: React.FC = () => {
           organized Excel files. No technical skills required.
         </p>
         <div className="flex flex-col sm:flex-row gap-4">
-          <Button 
-            size="lg" 
-            className="rounded-full px-8 py-6 animate-pulse-soft"
-            onClick={scrollToFileUpload}
-          >
-            Start Converting
-          </Button>
-          
           {!user && (
             <Button 
-              variant="outline" 
+              variant="default"
               size="lg" 
-              className="rounded-full px-8 py-6 glass-card hover:bg-white/80 transition-all duration-300"
+              className="rounded-full px-8 py-6 bg-blue-600 hover:bg-blue-700"
               asChild
             >
               <Link to="/auth">
                 Start For Free
               </Link>
+            </Button>
+          )}
+          
+          {user && (
+            <Button 
+              size="lg" 
+              className="rounded-full px-8 py-6"
+              onClick={scrollToFileUpload}
+            >
+              Start Converting
             </Button>
           )}
           

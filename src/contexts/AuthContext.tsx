@@ -34,7 +34,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           // Check if user is admin - use setTimeout to prevent auth deadlock
           setTimeout(async () => {
             try {
-              const { data, error } = await supabase
+              const { data } = await supabase
                 .from('user_roles')
                 .select('role')
                 .eq('user_id', session.user.id)
@@ -62,7 +62,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Check if user is admin
         setTimeout(async () => {
           try {
-            const { data, error } = await supabase
+            const { data } = await supabase
               .from('user_roles')
               .select('role')
               .eq('user_id', session.user.id)
