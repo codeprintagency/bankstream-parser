@@ -53,8 +53,11 @@ const Layout: React.FC<LayoutProps> = ({ children, className }) => {
                     variant="ghost" 
                     size="icon"
                     className="text-primary"
+                    asChild
                   >
-                    <UserCircle className="h-5 w-5" />
+                    <Link to="/auth">
+                      <UserCircle className="h-5 w-5" />
+                    </Link>
                   </Button>
                   <Button 
                     variant="outline" 
@@ -74,16 +77,30 @@ const Layout: React.FC<LayoutProps> = ({ children, className }) => {
 
           <div className="md:hidden flex items-center">
             {user ? (
-              <Button 
-                variant="ghost" 
-                size="icon"
-                className="text-primary mr-2"
-                asChild
-              >
-                <Link to="/auth">
-                  <UserCircle className="h-5 w-5" />
-                </Link>
-              </Button>
+              <>
+                {isAdmin && (
+                  <Button variant="outline" size="sm" className="mr-2" asChild>
+                    <Link to="/admin">Admin</Link>
+                  </Button>
+                )}
+                <Button 
+                  variant="ghost" 
+                  size="icon"
+                  className="text-primary mr-2"
+                  asChild
+                >
+                  <Link to="/auth">
+                    <UserCircle className="h-5 w-5" />
+                  </Link>
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => signOut()}
+                >
+                  Sign Out
+                </Button>
+              </>
             ) : (
               <Button size="sm" asChild>
                 <Link to="/auth">Sign In</Link>
