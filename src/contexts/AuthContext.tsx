@@ -7,6 +7,7 @@ interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   isAdmin: boolean;
+  userRole: string;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -17,6 +18,7 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   isLoading: true,
   isAdmin: false,
+  userRole: "user",
   signIn: async () => {},
   signUp: async () => {},
   signOut: async () => {},
@@ -29,6 +31,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [userRole, setUserRole] = useState<string>("user");
 
   useEffect(() => {
     async function fetchUser() {
@@ -40,10 +43,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         
         if (session?.user) {
           setUser(session.user);
-          await checkAdminStatus(session.user.id);
+          await checkUserRole(session.user.id);
         } else {
           setUser(null);
           setIsAdmin(false);
+          setUserRole("user");
         }
       } catch (error) {
         console.error("Error fetching auth user:", error);
@@ -58,10 +62,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session?.user) {
         setUser(session.user);
-        await checkAdminStatus(session.user.id);
+        await checkUserRole(session.user.id);
       } else {
         setUser(null);
         setIsAdmin(false);
+        setUserRole("user");
       }
     });
 
@@ -70,16 +75,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
-  const checkAdminStatus = async (userId: string) => {
+  const checkUserRole = async (userId: string) => {
     try {
-      // Use the is_admin function in Supabase to check if user is an admin
-      const { data, error } = await supabase.rpc('is_admin', { user_id: userId });
+      // Get the user's role from user_roles table
+      const { data, error } = await supabase
+        .from('user_roles')
+        .select('role')
+        .eq('user_id', userId)
+        .single();
       
-      if (error) throw error;
-      setIsAdmin(data || false);
+      if (error && error.code !== 'PGRST116') {
+        throw error;
+      }
+      
+      const role = data?.role || "user";
+      setUserRole(role);
+      setIsAdmin(role === "admin");
+      
     } catch (error) {
-      console.error("Error checking admin status:", error);
+      console.error("Error checking user role:", error);
       setIsAdmin(false);
+      setUserRole("user");
     }
   };
 
@@ -92,7 +108,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (error) throw error;
     
     if (data.user) {
-      await checkAdminStatus(data.user.id);
+      await checkUserRole(data.user.id);
     }
   };
 
@@ -120,6 +136,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         isLoading,
         isAdmin,
+        userRole,
         signIn,
         signUp,
         signOut,

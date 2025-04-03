@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
@@ -10,9 +9,11 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 const Admin: React.FC = () => {
-  const { user, isLoading, isAdmin } = useAuth();
+  const { user, isLoading, isAdmin, getToken } = useAuth();
   const { toast } = useToast();
   const [users, setUsers] = useState<any[]>([]);
   const [subscriptions, setSubscriptions] = useState<any[]>([]);
@@ -21,12 +22,15 @@ const Admin: React.FC = () => {
   const [isLoadingSubscriptions, setIsLoadingSubscriptions] = useState(false);
   const [isLoadingApiKey, setIsLoadingApiKey] = useState(false);
   const [isSavingApiKey, setIsSavingApiKey] = useState(false);
+  const [isUpdatingRole, setIsUpdatingRole] = useState(false);
+  const [userRoles, setUserRoles] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (isAdmin) {
       fetchUsers();
       fetchSubscriptions();
       fetchClaudeApiKey();
+      fetchUserRoles();
     }
   }, [isAdmin]);
 
@@ -53,6 +57,30 @@ const Admin: React.FC = () => {
       });
     } finally {
       setIsLoadingUsers(false);
+    }
+  };
+
+  const fetchUserRoles = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('user_roles')
+        .select('user_id, role');
+      
+      if (error) throw error;
+      
+      const roles: Record<string, string> = {};
+      (data || []).forEach((item) => {
+        roles[item.user_id] = item.role;
+      });
+      
+      setUserRoles(roles);
+    } catch (error: any) {
+      console.error("Error fetching user roles:", error);
+      toast({
+        title: "Error fetching user roles",
+        description: error.message,
+        variant: "destructive",
+      });
     }
   };
 
@@ -138,6 +166,54 @@ const Admin: React.FC = () => {
     }
   };
 
+  const updateUserRole = async (userId: string, role: string) => {
+    setIsUpdatingRole(true);
+    try {
+      // First check if the user already has a role
+      const { data: existingRole } = await supabase
+        .from('user_roles')
+        .select('*')
+        .eq('user_id', userId)
+        .single();
+
+      let result;
+      if (existingRole) {
+        // Update existing role
+        result = await supabase
+          .from('user_roles')
+          .update({ role })
+          .eq('user_id', userId);
+      } else {
+        // Insert new role
+        result = await supabase
+          .from('user_roles')
+          .insert({ user_id: userId, role });
+      }
+
+      if (result.error) throw result.error;
+      
+      toast({
+        title: "Role Updated",
+        description: `User role has been updated to ${role}`,
+      });
+      
+      // Update local state
+      setUserRoles(prev => ({
+        ...prev,
+        [userId]: role
+      }));
+    } catch (error: any) {
+      console.error("Error updating user role:", error);
+      toast({
+        title: "Error updating role",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsUpdatingRole(false);
+    }
+  };
+
   // If still loading auth state, show loading spinner
   if (isLoading) {
     return (
@@ -170,7 +246,7 @@ const Admin: React.FC = () => {
             <Card>
               <CardHeader>
                 <CardTitle>Users</CardTitle>
-                <CardDescription>Manage user accounts</CardDescription>
+                <CardDescription>Manage user accounts and roles</CardDescription>
               </CardHeader>
               <CardContent>
                 {isLoadingUsers ? (
@@ -179,24 +255,53 @@ const Admin: React.FC = () => {
                   </div>
                 ) : users.length > 0 ? (
                   <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead>
-                        <tr className="border-b">
-                          <th className="text-left pb-2">ID</th>
-                          <th className="text-left pb-2">Name</th>
-                          <th className="text-left pb-2">Created</th>
-                        </tr>
-                      </thead>
-                      <tbody>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>ID</TableHead>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Created</TableHead>
+                          <TableHead>Role</TableHead>
+                          <TableHead>Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
                         {users.map(user => (
-                          <tr key={user.id} className="border-b hover:bg-muted/50">
-                            <td className="py-2">{user.id.substring(0, 8)}...</td>
-                            <td className="py-2">{user.first_name} {user.last_name}</td>
-                            <td className="py-2">{new Date(user.created_at).toLocaleDateString()}</td>
-                          </tr>
+                          <TableRow key={user.id}>
+                            <TableCell className="font-mono text-xs">{user.id.substring(0, 8)}...</TableCell>
+                            <TableCell>{user.first_name} {user.last_name}</TableCell>
+                            <TableCell>{new Date(user.created_at).toLocaleDateString()}</TableCell>
+                            <TableCell>
+                              <Select
+                                value={userRoles[user.id] || "user"}
+                                onValueChange={(value) => updateUserRole(user.id, value)}
+                                disabled={isUpdatingRole}
+                              >
+                                <SelectTrigger className="w-[180px]">
+                                  <SelectValue placeholder="Select role" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="admin">Admin</SelectItem>
+                                  <SelectItem value="subscriber">Subscriber</SelectItem>
+                                  <SelectItem value="user">Free User</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </TableCell>
+                            <TableCell>
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                className="text-xs"
+                                onClick={() => updateUserRole(user.id, userRoles[user.id] || "user")}
+                                disabled={isUpdatingRole}
+                              >
+                                Update
+                              </Button>
+                            </TableCell>
+                          </TableRow>
                         ))}
-                      </tbody>
-                    </table>
+                      </TableBody>
+                    </Table>
                   </div>
                 ) : (
                   <p>No users found.</p>
