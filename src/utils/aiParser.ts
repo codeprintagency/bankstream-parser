@@ -1,3 +1,4 @@
+
 // For TypeScript's benefit, declare what's available in the browser's localStorage
 declare global {
   interface Window {
@@ -120,7 +121,7 @@ export async function parseTransactionsWithAI(
       
       // Create request with PDF document
       requestOptions = {
-        model: "claude-3-opus-20240229",
+        model: "claude-3-opus-20240229", // Using Claude-3 Opus model for direct PDF upload
         max_tokens: 4000,
         messages: [
           {
@@ -149,6 +150,7 @@ export async function parseTransactionsWithAI(
       if (Array.isArray(data)) {
         // Use the helper method to prepare the text-only request
         requestOptions = ApiService.prepareTextRequestOptions(data);
+        console.log("Using Claude-3 Haiku model for text extraction");
       } else {
         throw new Error("Invalid data format for text extraction approach");
       }

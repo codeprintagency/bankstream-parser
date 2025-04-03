@@ -1,8 +1,9 @@
+
 import React, { useState, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
 import { Upload, FileText, Check, AlertCircle, Zap, Bug, Key } from "lucide-react";
-import { convertPdfToExcel, generateExcelFile, downloadExcelFile, Transaction, extractTextFromPdf, prepareExtractedTextForAI } from "@/utils/fileConverter";
+import { downloadExcelFile, Transaction, extractTextFromPdf, prepareExtractedTextForAI } from "@/utils/fileConverter";
 import { parseTransactionsWithAI, hasPremiumAccess, togglePremiumAccess, getClaudeApiKey, setClaudeApiKey } from "@/utils/aiParser";
 import TransactionTable from "./TransactionTable";
 import { Switch } from "@/components/ui/switch";
@@ -11,6 +12,9 @@ import { Input } from "@/components/ui/input";
 import DebugModal from "./DebugModal";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ApiService } from "@/utils/ApiService";
+import { Badge } from "@/components/ui/badge";
+import { Info } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 const FileUpload: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
@@ -18,13 +22,13 @@ const FileUpload: React.FC = () => {
   const [isConverting, setIsConverting] = useState(false);
   const [isConverted, setIsConverted] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [useAI, setUseAI] = useState(false);
-  const [directPdfUpload, setDirectPdfUpload] = useState(false); // Changed to false by default
+  const [directPdfUpload, setDirectPdfUpload] = useState(false);
   const [isPremium, setIsPremium] = useState(() => hasPremiumAccess());
   const [debugModalOpen, setDebugModalOpen] = useState(false);
   const [apiKeyPopoverOpen, setApiKeyPopoverOpen] = useState(false);
   const [apiKey, setApiKey] = useState(() => getClaudeApiKey() || "");
   const [error, setError] = useState<string | null>(null);
+  const [claudeModel, setClaudeModel] = useState<string>("claude-3-haiku-20240307");
   const { toast } = useToast();
 
   // Load API key from storage on component mount
@@ -109,84 +113,75 @@ const FileUpload: React.FC = () => {
     setError(null);
     
     try {
-      if (useAI) {
-        // Check if premium access is available
-        if (!isPremium) {
-          toast({
-            title: "Premium Feature",
-            description: "AI parsing requires premium access. Enable it in settings.",
-            variant: "destructive",
-          });
-          setIsConverting(false);
-          return;
-        }
-        
-        // Check if API key is available
-        const currentApiKey = getClaudeApiKey();
-        if (!currentApiKey) {
-          setApiKeyPopoverOpen(true);
-          toast({
-            title: "API Key Required",
-            description: "Claude API key is required for AI parsing. Please enter your API key.",
-            variant: "destructive",
-          });
-          setIsConverting(false);
-          return;
-        }
-        
+      // Check if premium access is available
+      if (!isPremium) {
         toast({
-          title: "AI Processing",
-          description: `Sending to Claude AI for analysis${directPdfUpload ? " using direct PDF upload" : " using text extraction"}...`,
+          title: "Premium Feature",
+          description: "AI parsing requires premium access. Enable it in settings.",
+          variant: "destructive",
         });
-        
-        let aiExtractedTransactions;
-        
-        if (directPdfUpload) {
-          // Direct PDF upload approach - send the raw PDF data
-          const arrayBuffer = await file.arrayBuffer();
-          console.log("Using direct PDF upload method, file size:", arrayBuffer.byteLength);
-          
-          // Use AI parsing with the raw PDF data
-          aiExtractedTransactions = await parseTransactionsWithAI(arrayBuffer, currentApiKey);
-        } else {
-          // Text extraction approach
-          console.log("Using text extraction method");
-          const extractedItems = await extractTextFromPdf(file);
-          const extractedText = prepareExtractedTextForAI(extractedItems);
-          console.log("Extracted text from PDF, total pages:", extractedText.length);
-          
-          // Use text-only API request options
-          const requestOptions = ApiService.prepareTextRequestOptions(extractedText);
-          console.log("Prepared text-only request for Claude");
-          
-          // Make the API request directly with text content
-          const apiResponse = await ApiService.callClaudeApi(currentApiKey, requestOptions);
-          console.log("Received API response from Claude");
-          
-          // Parse the Claude response to extract transactions
-          aiExtractedTransactions = await parseTransactionsWithAI(extractedText, currentApiKey, false);
-        }
-        
-        setTransactions(aiExtractedTransactions);
-        
-        toast({
-          title: "AI Conversion Successful",
-          description: `${aiExtractedTransactions.length} transactions have been extracted from your statement`,
-        });
-        
-        setIsConverted(true);
-      } else {
-        // Use traditional parsing
-        const extractedTransactions = await convertPdfToExcel(file);
-        setTransactions(extractedTransactions);
-        
-        toast({
-          title: "Conversion Successful",
-          description: `${extractedTransactions.length} transactions have been extracted from your statement`,
-        });
-        
-        setIsConverted(true);
+        setIsConverting(false);
+        return;
       }
+      
+      // Check if API key is available
+      const currentApiKey = getClaudeApiKey();
+      if (!currentApiKey) {
+        setApiKeyPopoverOpen(true);
+        toast({
+          title: "API Key Required",
+          description: "Claude API key is required for AI parsing. Please enter your API key.",
+          variant: "destructive",
+        });
+        setIsConverting(false);
+        return;
+      }
+      
+      toast({
+        title: "AI Processing",
+        description: `Sending to Claude AI for analysis${directPdfUpload ? " using direct PDF upload" : " using text extraction"}...`,
+      });
+      
+      let aiExtractedTransactions;
+      let modelUsed = "claude-3-haiku-20240307";
+      
+      if (directPdfUpload) {
+        // Direct PDF upload approach - send the raw PDF data
+        const arrayBuffer = await file.arrayBuffer();
+        console.log("Using direct PDF upload method, file size:", arrayBuffer.byteLength);
+        
+        // Use AI parsing with the raw PDF data
+        aiExtractedTransactions = await parseTransactionsWithAI(arrayBuffer, currentApiKey);
+        modelUsed = "claude-3-opus-20240229"; // Direct PDF uploads use the Opus model
+      } else {
+        // Text extraction approach
+        console.log("Using text extraction method");
+        const extractedItems = await extractTextFromPdf(file);
+        const extractedText = prepareExtractedTextForAI(extractedItems);
+        console.log("Extracted text from PDF, total pages:", extractedText.length);
+        
+        // Use text-only API request options
+        const requestOptions = ApiService.prepareTextRequestOptions(extractedText);
+        modelUsed = requestOptions.model;
+        console.log("Prepared text-only request for Claude using model:", modelUsed);
+        
+        // Make the API request directly with text content
+        const apiResponse = await ApiService.callClaudeApi(currentApiKey, requestOptions);
+        console.log("Received API response from Claude");
+        
+        // Parse the Claude response to extract transactions
+        aiExtractedTransactions = await parseTransactionsWithAI(extractedText, currentApiKey, false);
+      }
+      
+      setClaudeModel(modelUsed);
+      setTransactions(aiExtractedTransactions);
+      
+      toast({
+        title: "AI Conversion Successful",
+        description: `${aiExtractedTransactions.length} transactions have been extracted from your statement`,
+      });
+      
+      setIsConverted(true);
     } catch (error: any) {
       console.error("Conversion error:", error);
       setError(error.message || "Unknown error occurred");
@@ -206,19 +201,21 @@ const FileUpload: React.FC = () => {
     } finally {
       setIsConverting(false);
     }
-  }, [file, toast, useAI, isPremium, directPdfUpload]);
+  }, [file, toast, isPremium, directPdfUpload]);
 
   const handleDownload = useCallback(() => {
     if (transactions.length === 0) return;
     
     try {
       // Generate and download the Excel file
-      const excelData = generateExcelFile(transactions);
-      downloadExcelFile(excelData, `bank-statement-${new Date().toISOString().slice(0, 10)}.xlsx`);
-      
-      toast({
-        title: "Download Started",
-        description: "Your Excel file is being downloaded",
+      import("@/utils/excel/excelExporter").then(({ generateExcelFile }) => {
+        const excelData = generateExcelFile(transactions);
+        downloadExcelFile(excelData, `bank-statement-${new Date().toISOString().slice(0, 10)}.xlsx`);
+        
+        toast({
+          title: "Download Started",
+          description: "Your Excel file is being downloaded",
+        });
       });
     } catch (error) {
       console.error("Download error:", error);
@@ -233,38 +230,45 @@ const FileUpload: React.FC = () => {
   return (
     <section id="file-upload-section" className="container mx-auto px-4 md:px-8 py-16 md:py-24">
       <div className="max-w-4xl mx-auto">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex flex-col space-y-2 sm:flex-row sm:space-y-0 sm:space-x-6">
-            <div className="flex items-center space-x-2">
-              <Switch 
-                id="parsing-mode" 
-                checked={useAI} 
-                onCheckedChange={setUseAI} 
-                disabled={isConverting}
-              />
-              <Label htmlFor="parsing-mode" className="flex items-center">
-                <span>AI Parsing</span>
-                {useAI && <Zap className="w-4 h-4 ml-1 text-yellow-500" />}
-              </Label>
-            </div>
+        <div className="flex flex-col space-y-4 sm:flex-row sm:space-y-0 sm:items-center sm:justify-between mb-6">
+          <div className="flex items-center space-x-3">
+            <Badge variant="outline" className="bg-gradient-to-r from-purple-500 to-indigo-600 text-white px-3 py-1">
+              AI Powered
+            </Badge>
             
-            {useAI && (
-              <div className="flex items-center space-x-2">
-                <Switch 
-                  id="pdf-upload-mode" 
-                  checked={directPdfUpload} 
-                  onCheckedChange={setDirectPdfUpload} 
-                  disabled={isConverting}
-                />
-                <Label htmlFor="pdf-upload-mode" className="flex items-center">
-                  <span>Direct PDF Upload</span>
-                  {directPdfUpload && <FileText className="w-4 h-4 ml-1 text-blue-500" />}
-                </Label>
-              </div>
-            )}
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center text-sm text-muted-foreground">
+                    <span>Using Claude Model: {claudeModel}</span>
+                    <Info className="ml-1 w-4 h-4" />
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p className="text-xs">
+                    {directPdfUpload ? 
+                      "Direct PDF upload uses Claude Opus model for better document analysis" : 
+                      "Text extraction uses Claude Haiku model for faster processing"}
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           </div>
           
           <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-2">
+              <Switch 
+                id="pdf-upload-mode" 
+                checked={directPdfUpload} 
+                onCheckedChange={setDirectPdfUpload} 
+                disabled={isConverting}
+              />
+              <Label htmlFor="pdf-upload-mode" className="flex items-center">
+                <span>Direct PDF Upload</span>
+                {directPdfUpload && <FileText className="w-4 h-4 ml-1 text-blue-500" />}
+              </Label>
+            </div>
+            
             <Popover open={apiKeyPopoverOpen} onOpenChange={setApiKeyPopoverOpen}>
               <PopoverTrigger asChild>
                 <Button 
@@ -367,23 +371,23 @@ const FileUpload: React.FC = () => {
           
           <h2 className="text-2xl md:text-3xl font-semibold mb-3">
             {isConverted 
-              ? "Conversion Complete" 
+              ? "AI Conversion Complete" 
               : error
                 ? "Conversion Failed"
                 : file 
-                  ? "Ready to Convert" 
+                  ? "Ready for AI Analysis" 
                   : "Upload Your Bank Statement"
             }
           </h2>
           
           <p className="text-muted-foreground mb-6 max-w-lg">
             {isConverted 
-              ? `${transactions.length} transactions have been extracted from your statement` 
+              ? `${transactions.length} transactions have been extracted from your statement using Claude AI` 
               : error
                 ? "An error occurred while processing your file. Check the debug information."
                 : file 
-                  ? `Selected file: ${file.name}${useAI ? (directPdfUpload ? " (AI with Direct PDF Upload)" : " (AI with Text Extraction)") : ""}`
-                  : `Drag and drop your PDF bank statement here, or click to browse files${useAI ? ". Using AI mode" : ""}`
+                  ? `Selected file: ${file.name} (${directPdfUpload ? "Direct PDF Upload" : "Text Extraction"})`
+                  : "Drag and drop your PDF bank statement here, or click to browse files"
             }
           </p>
           
@@ -408,11 +412,10 @@ const FileUpload: React.FC = () => {
             <Button 
               onClick={handleConvert} 
               disabled={isConverting}
-              className="relative"
+              className="relative bg-purple-600 hover:bg-purple-700"
             >
-              {isConverting ? "Converting..." : useAI ? 
-                (directPdfUpload ? "Convert with Direct PDF Upload" : "Convert with Text Extraction") 
-                : "Convert to Excel"}
+              {isConverting ? "Processing with AI..." : 
+                (directPdfUpload ? "Analyze with Direct PDF Upload" : "Analyze with Text Extraction")}
               {isConverting && (
                 <span className="absolute inset-0 flex items-center justify-center">
                   <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
@@ -461,7 +464,7 @@ const FileUpload: React.FC = () => {
         
         <div className="mt-4 flex items-center justify-center text-xs text-muted-foreground">
           <AlertCircle className="w-3 h-3 mr-1" />
-          <span>Bank statements are processed securely and never stored on our servers</span>
+          <span>Bank statements are processed securely with Claude AI and never stored on our servers</span>
         </div>
       </div>
       
