@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
@@ -16,7 +15,7 @@ import { supabase } from "@/integrations/supabase/client";
 const FREE_PAGE_LIMIT = 1;
 
 const FileUpload: React.FC = () => {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isConverting, setIsConverting] = useState(false);
@@ -88,11 +87,18 @@ const FileUpload: React.FC = () => {
       const numPages = await checkPageCount(file);
       setPageCount(numPages);
       
-      if (numPages > FREE_PAGE_LIMIT && !user) {
+      // Admins can upload any number of pages
+      if (isAdmin) {
+        // Skip page limit checks for admins
+      }
+      // Non-admins need to be logged in for more than FREE_PAGE_LIMIT pages
+      else if (numPages > FREE_PAGE_LIMIT && !user) {
         setLoginDialogOpen(true);
         setIsConverting(false);
         return;
-      } else if (numPages > FREE_PAGE_LIMIT && user) {
+      } 
+      // Logged in users with more than FREE_PAGE_LIMIT pages need a subscription
+      else if (numPages > FREE_PAGE_LIMIT && user && !isAdmin) {
         // Check if user has a paid subscription
         const { data: subscription } = await supabase
           .from('subscriptions')
@@ -142,7 +148,7 @@ const FileUpload: React.FC = () => {
     } finally {
       setIsConverting(false);
     }
-  }, [file, toast, user]);
+  }, [file, toast, user, isAdmin]);
 
   const handleDownload = useCallback(async () => {
     if (transactions.length === 0) return;
@@ -182,6 +188,11 @@ const FileUpload: React.FC = () => {
             <Badge variant="outline" className="bg-gradient-to-r from-purple-500 to-indigo-600 text-white px-3 py-1">
               AI Powered
             </Badge>
+            {isAdmin && (
+              <Badge variant="outline" className="bg-red-500 text-white px-3 py-1">
+                Admin Mode
+              </Badge>
+            )}
           </div>
         </div>
         
@@ -242,9 +253,17 @@ const FileUpload: React.FC = () => {
             }
           </p>
           
-          <p className="text-xs text-muted-foreground mb-4">
-            Free tier: Process up to {FREE_PAGE_LIMIT} page only. For larger documents, please subscribe.
-          </p>
+          {!isAdmin && !file && !isConverted && !error && (
+            <p className="text-xs text-muted-foreground mb-4">
+              {user ? 'Free tier: Process up to 1 page only. For larger documents, please subscribe.' : 'Please sign in to process your documents.'}
+            </p>
+          )}
+          
+          {isAdmin && !file && !isConverted && !error && (
+            <p className="text-xs text-muted-foreground mb-4">
+              Admin mode: No page limit restrictions.
+            </p>
+          )}
           
           {!file && !isConverted && !error && (
             <div className="relative">

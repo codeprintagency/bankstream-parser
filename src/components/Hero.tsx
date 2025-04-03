@@ -44,10 +44,12 @@ const Hero: React.FC = () => {
           {user && (
             <Button 
               size="lg" 
-              className="rounded-full px-8 py-6"
-              onClick={scrollToFileUpload}
+              className="rounded-full px-8 py-6 bg-purple-600 hover:bg-purple-700"
+              asChild
             >
-              Start Converting
+              <Link to="/dashboard">
+                Go to Dashboard
+              </Link>
             </Button>
           )}
           

@@ -22,18 +22,29 @@ const Layout: React.FC<LayoutProps> = ({ children, className }) => {
             BankStream
           </Link>
           <nav className="hidden md:flex items-center space-x-8">
-            <a 
-              href="#features" 
-              className="text-sm font-medium text-gray-700 hover:text-primary transition-colors duration-200"
-            >
-              Features
-            </a>
-            <a 
-              href="#banks" 
-              className="text-sm font-medium text-gray-700 hover:text-primary transition-colors duration-200"
-            >
-              Supported Banks
-            </a>
+            {user ? (
+              <Link 
+                to="/dashboard" 
+                className="text-sm font-medium text-gray-700 hover:text-primary transition-colors duration-200"
+              >
+                Dashboard
+              </Link>
+            ) : (
+              <>
+                <a 
+                  href="#features" 
+                  className="text-sm font-medium text-gray-700 hover:text-primary transition-colors duration-200"
+                >
+                  Features
+                </a>
+                <a 
+                  href="#banks" 
+                  className="text-sm font-medium text-gray-700 hover:text-primary transition-colors duration-200"
+                >
+                  Supported Banks
+                </a>
+              </>
+            )}
             <a 
               href="#pricing" 
               className="text-sm font-medium text-gray-700 hover:text-primary transition-colors duration-200"
@@ -55,7 +66,7 @@ const Layout: React.FC<LayoutProps> = ({ children, className }) => {
                     className="text-primary"
                     asChild
                   >
-                    <Link to="/auth">
+                    <Link to="/dashboard">
                       <UserCircle className="h-5 w-5" />
                     </Link>
                   </Button>
@@ -89,7 +100,7 @@ const Layout: React.FC<LayoutProps> = ({ children, className }) => {
                   className="text-primary mr-2"
                   asChild
                 >
-                  <Link to="/auth">
+                  <Link to="/dashboard">
                     <UserCircle className="h-5 w-5" />
                   </Link>
                 </Button>
