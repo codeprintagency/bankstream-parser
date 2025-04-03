@@ -1,7 +1,7 @@
 
 import { useState, useCallback } from "react";
 import { useToast } from "@/components/ui/use-toast";
-import { Transaction, extractTextFromPdf, prepareExtractedTextForAI } from "@/utils/fileConverter";
+import { Transaction, extractTextFromPdf } from "@/utils/fileConverter";
 import { parseTransactionsWithAI } from "@/utils/aiParser";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -62,13 +62,11 @@ export function useConversion(options: ConversionOptions = {}) {
         description: `Sending to AI for analysis...`,
       });
       
-      // Text extraction approach
-      const extractedItems = await extractTextFromPdf(file);
-      const extractedText = prepareExtractedTextForAI(extractedItems);
-      console.log("Extracted text from PDF, total pages:", extractedText.length);
+      // Convert the file to ArrayBuffer for direct PDF upload
+      const arrayBuffer = await file.arrayBuffer();
       
-      // Use AI parsing with the extracted text
-      const aiExtractedTransactions = await parseTransactionsWithAI(extractedText, false);
+      // Always use direct PDF upload 
+      const aiExtractedTransactions = await parseTransactionsWithAI(arrayBuffer, true);
       
       setTransactions(aiExtractedTransactions);
       

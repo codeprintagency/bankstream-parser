@@ -45,10 +45,11 @@ export function getLastHtmlResponse(): string {
  */
 export async function parseTransactionsWithAI(
   data: ArrayBuffer | string[], 
-  isDirectPdfUpload: boolean = false
+  isDirectPdfUpload: boolean = true // Always set to true by default
 ): Promise<Transaction[]> {
   try {
     console.log("Starting AI parsing process");
+    console.log("Using direct PDF upload approach:", isDirectPdfUpload);
     
     let requestOptions;
     
@@ -65,37 +66,14 @@ export async function parseTransactionsWithAI(
       console.log("PDF converted to base64, size:", base64Data.length);
       
       // Create request with PDF document
-      requestOptions = {
-        model: "claude-3-opus-20240229", // Using Claude-3 Opus model for direct PDF upload
-        max_tokens: 4000,
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: "Please extract all financial transactions from this bank statement. Include date, description, and amount for each transaction."
-              },
-              {
-                type: "document",
-                source: {
-                  type: "base64",
-                  media_type: "application/pdf",
-                  data: base64Data
-                }
-              }
-            ]
-          }
-        ]
-      };
+      requestOptions = ApiService.preparePdfRequestOptions(base64Data);
     } else {
-      // Using text-only approach (either directly provided text or extraction)
+      // Using text-only approach as fallback
       console.log("Using text extraction approach for AI parsing");
       
       if (Array.isArray(data)) {
         // Use the helper method to prepare the text-only request
         requestOptions = ApiService.prepareTextRequestOptions(data);
-        console.log("Using text extraction approach");
       } else {
         throw new Error("Invalid data format for text extraction approach");
       }

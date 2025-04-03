@@ -21,6 +21,35 @@ export class ApiService {
       ]
     };
   }
+  
+  /**
+   * Prepares the request options for a direct PDF API call
+   */
+  static preparePdfRequestOptions(pdfBase64: string) {
+    return {
+      model: "claude-3-haiku-20240307",
+      max_tokens: 4000,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "Please extract all financial transactions from this bank statement. Include date, description, and amount for each transaction."
+            },
+            {
+              type: "document",
+              source: {
+                type: "base64",
+                media_type: "application/pdf",
+                data: pdfBase64
+              }
+            }
+          ]
+        }
+      ]
+    };
+  }
 
   /**
    * Makes an API call to Claude
