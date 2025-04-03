@@ -1,8 +1,12 @@
 
 import React from "react";
 import { Button } from "@/components/ui/button";
+import { Link } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
 
 const Hero: React.FC = () => {
+  const { user } = useAuth();
+  
   const scrollToFileUpload = () => {
     const fileUploadElement = document.getElementById("file-upload-section");
     if (fileUploadElement) {
@@ -31,13 +35,26 @@ const Hero: React.FC = () => {
           >
             Start Converting
           </Button>
-          <Button 
-            variant="outline" 
-            size="lg" 
-            className="rounded-full px-8 py-6 glass-card hover:bg-white/80 transition-all duration-300"
+          
+          {!user && (
+            <Button 
+              variant="outline" 
+              size="lg" 
+              className="rounded-full px-8 py-6 glass-card hover:bg-white/80 transition-all duration-300"
+              asChild
+            >
+              <Link to="/auth">
+                Start For Free
+              </Link>
+            </Button>
+          )}
+          
+          <a 
+            href="#pricing" 
+            className="rounded-full px-8 py-6 glass-card hover:bg-white/80 transition-all duration-300 border inline-flex items-center justify-center text-sm font-medium sm:text-base"
           >
-            Learn More
-          </Button>
+            View Pricing
+          </a>
         </div>
       </div>
     </section>

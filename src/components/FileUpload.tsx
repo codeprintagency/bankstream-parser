@@ -2,29 +2,29 @@
 import React, { useState, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
-import { Upload, FileText, Check, AlertCircle, Zap, Bug } from "lucide-react";
+import { Upload, FileText, Check, AlertCircle, Zap } from "lucide-react";
 import { downloadExcelFile, Transaction, extractTextFromPdf, prepareExtractedTextForAI } from "@/utils/fileConverter";
 import { parseTransactionsWithAI } from "@/utils/aiParser";
 import TransactionTable from "./TransactionTable";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
-import DebugModal from "./DebugModal";
 import { Badge } from "@/components/ui/badge";
 import PricingPlans from "./PricingPlans";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { useAuth } from "@/contexts/AuthContext";
+import { Link } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
 
 const FREE_PAGE_LIMIT = 1;
 
 const FileUpload: React.FC = () => {
+  const { user } = useAuth();
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isConverting, setIsConverting] = useState(false);
   const [isConverted, setIsConverted] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [directPdfUpload, setDirectPdfUpload] = useState(false);
-  const [debugModalOpen, setDebugModalOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pricingDialogOpen, setPricingDialogOpen] = useState(false);
+  const [loginDialogOpen, setLoginDialogOpen] = useState(false);
   const [pageCount, setPageCount] = useState(0);
   const { toast } = useToast();
 
@@ -88,36 +88,39 @@ const FileUpload: React.FC = () => {
       const numPages = await checkPageCount(file);
       setPageCount(numPages);
       
-      if (numPages > FREE_PAGE_LIMIT) {
-        setPricingDialogOpen(true);
+      if (numPages > FREE_PAGE_LIMIT && !user) {
+        setLoginDialogOpen(true);
         setIsConverting(false);
         return;
+      } else if (numPages > FREE_PAGE_LIMIT && user) {
+        // Check if user has a paid subscription
+        const { data: subscription } = await supabase
+          .from('subscriptions')
+          .select('plan_type, status')
+          .eq('user_id', user.id)
+          .eq('status', 'active')
+          .single();
+          
+        if (!subscription || subscription.plan_type === 'free') {
+          setPricingDialogOpen(true);
+          setIsConverting(false);
+          return;
+        }
       }
       
       toast({
         title: "AI Processing",
-        description: `Sending to AI for analysis${directPdfUpload ? " using direct PDF upload" : " using text extraction"}...`,
+        description: `Sending to AI for analysis...`,
       });
       
-      let aiExtractedTransactions;
+      // Text extraction approach
+      console.log("Using text extraction method");
+      const extractedItems = await extractTextFromPdf(file);
+      const extractedText = prepareExtractedTextForAI(extractedItems);
+      console.log("Extracted text from PDF, total pages:", extractedText.length);
       
-      if (directPdfUpload) {
-        // Direct PDF upload approach - send the raw PDF data
-        const arrayBuffer = await file.arrayBuffer();
-        console.log("Using direct PDF upload method, file size:", arrayBuffer.byteLength);
-        
-        // Use AI parsing with the raw PDF data
-        aiExtractedTransactions = await parseTransactionsWithAI(arrayBuffer);
-      } else {
-        // Text extraction approach
-        console.log("Using text extraction method");
-        const extractedItems = await extractTextFromPdf(file);
-        const extractedText = prepareExtractedTextForAI(extractedItems);
-        console.log("Extracted text from PDF, total pages:", extractedText.length);
-        
-        // Use AI parsing with the extracted text
-        aiExtractedTransactions = await parseTransactionsWithAI(extractedText, false);
-      }
+      // Use AI parsing with the extracted text
+      const aiExtractedTransactions = await parseTransactionsWithAI(extractedText, false);
       
       setTransactions(aiExtractedTransactions);
       
@@ -139,12 +142,18 @@ const FileUpload: React.FC = () => {
     } finally {
       setIsConverting(false);
     }
-  }, [file, toast, directPdfUpload]);
+  }, [file, toast, user]);
 
-  const handleDownload = useCallback(() => {
+  const handleDownload = useCallback(async () => {
     if (transactions.length === 0) return;
     
     try {
+      // Check if user is logged in for downloads
+      if (!user) {
+        setLoginDialogOpen(true);
+        return;
+      }
+      
       // Generate and download the Excel file
       import("@/utils/excel/excelExporter").then(({ generateExcelFile }) => {
         const excelData = generateExcelFile(transactions);
@@ -163,7 +172,7 @@ const FileUpload: React.FC = () => {
         variant: "destructive",
       });
     }
-  }, [transactions, toast]);
+  }, [transactions, toast, user]);
 
   return (
     <section id="file-upload-section" className="container mx-auto px-4 md:px-8 py-16 md:py-24">
@@ -174,31 +183,6 @@ const FileUpload: React.FC = () => {
               AI Powered
             </Badge>
           </div>
-          
-          <div className="flex items-center space-x-2">
-            <div className="flex items-center space-x-2">
-              <Switch 
-                id="pdf-upload-mode" 
-                checked={directPdfUpload} 
-                onCheckedChange={setDirectPdfUpload} 
-                disabled={isConverting}
-              />
-              <Label htmlFor="pdf-upload-mode" className="flex items-center">
-                <span>Direct PDF Upload</span>
-                {directPdfUpload && <FileText className="w-4 h-4 ml-1 text-blue-500" />}
-              </Label>
-            </div>
-            
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setDebugModalOpen(true)}
-              className="flex items-center gap-1"
-            >
-              <Bug className="w-4 h-4" />
-              <span>Debug</span>
-            </Button>
-          </div>
         </div>
         
         {error && (
@@ -207,14 +191,6 @@ const FileUpload: React.FC = () => {
             <div>
               <p className="font-semibold">Error</p>
               <p className="text-sm">{error}</p>
-              <Button 
-                variant="outline" 
-                size="sm"
-                className="mt-2 text-red-800 border-red-300 hover:bg-red-100"
-                onClick={() => setDebugModalOpen(true)}
-              >
-                View Debug Info
-              </Button>
             </div>
           </div>
         )}
@@ -259,9 +235,9 @@ const FileUpload: React.FC = () => {
             {isConverted 
               ? `${transactions.length} transactions have been extracted from your statement using AI` 
               : error
-                ? "An error occurred while processing your file. Check the debug information."
+                ? "An error occurred while processing your file. Try again with a different file."
                 : file 
-                  ? `Selected file: ${file.name} (${directPdfUpload ? "Direct PDF Upload" : "Text Extraction"})`
+                  ? `Selected file: ${file.name}`
                   : "Drag and drop your PDF bank statement here, or click to browse files"
             }
           </p>
@@ -293,8 +269,7 @@ const FileUpload: React.FC = () => {
               disabled={isConverting}
               className="relative bg-purple-600 hover:bg-purple-700"
             >
-              {isConverting ? "Processing with AI..." : 
-                (directPdfUpload ? "Analyze with Direct PDF Upload" : "Analyze with Text Extraction")}
+              {isConverting ? "Processing with AI..." : "Analyze with AI"}
               {isConverting && (
                 <span className="absolute inset-0 flex items-center justify-center">
                   <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
@@ -347,9 +322,6 @@ const FileUpload: React.FC = () => {
         </div>
       </div>
       
-      {/* Debug Modal */}
-      <DebugModal open={debugModalOpen} onOpenChange={setDebugModalOpen} />
-      
       {/* Pricing Plans Dialog */}
       <Dialog open={pricingDialogOpen} onOpenChange={setPricingDialogOpen}>
         <DialogContent className="sm:max-w-4xl">
@@ -361,6 +333,27 @@ const FileUpload: React.FC = () => {
               The free tier supports only {FREE_PAGE_LIMIT} page. Please subscribe to a plan to process larger documents.
             </p>
             <PricingPlans onSelectPlan={() => setPricingDialogOpen(false)} />
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Login Dialog */}
+      <Dialog open={loginDialogOpen} onOpenChange={setLoginDialogOpen}>
+        <DialogContent>
+          <div className="py-4">
+            <h2 className="text-2xl font-bold text-center mb-6">
+              Create an Account
+            </h2>
+            <p className="text-center mb-8">
+              Please create an account or log in to continue.
+            </p>
+            <div className="flex justify-center">
+              <Button asChild>
+                <Link to="/auth">
+                  Sign In / Sign Up
+                </Link>
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

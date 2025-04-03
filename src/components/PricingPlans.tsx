@@ -2,6 +2,8 @@
 import React from "react";
 import { Button } from "@/components/ui/button";
 import { Check } from "lucide-react";
+import { Link } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface PlanProps {
   title: string;
@@ -22,6 +24,8 @@ const PricingPlan: React.FC<PlanProps> = ({
   popular = false,
   onSelect
 }) => {
+  const { user } = useAuth();
+
   return (
     <div className={`
       rounded-lg p-6 shadow-lg flex flex-col h-full
@@ -53,12 +57,23 @@ const PricingPlan: React.FC<PlanProps> = ({
         </ul>
       </div>
       
-      <Button 
-        className={popular ? "bg-purple-500 hover:bg-purple-600" : "bg-gray-800 hover:bg-gray-900"} 
-        onClick={onSelect}
-      >
-        Get Started
-      </Button>
+      {user ? (
+        <Button 
+          className={popular ? "bg-purple-500 hover:bg-purple-600" : "bg-gray-800 hover:bg-gray-900"} 
+          onClick={onSelect}
+        >
+          Get Started
+        </Button>
+      ) : (
+        <Button 
+          className={popular ? "bg-purple-500 hover:bg-purple-600" : "bg-gray-800 hover:bg-gray-900"} 
+          asChild
+        >
+          <Link to="/auth">
+            Sign Up
+          </Link>
+        </Button>
+      )}
     </div>
   );
 };
@@ -74,7 +89,7 @@ const PricingPlans: React.FC<PricingPlansProps> = ({ onSelectPlan }) => {
   };
   
   return (
-    <div className="px-4 py-6">
+    <div id="pricing" className="px-4 py-6">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <PricingPlan
           title="Lite"
