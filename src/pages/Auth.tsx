@@ -6,8 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import Layout from "@/components/Layout";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/components/ui/use-toast";
 
 const Auth: React.FC = () => {
   const { user, isLoading, signIn, signUp } = useAuth();
@@ -15,6 +17,8 @@ const Auth: React.FC = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isMakingAdmin, setIsMakingAdmin] = useState(false);
+  const { toast } = useToast();
 
   if (isLoading) {
     return (
@@ -24,10 +28,6 @@ const Auth: React.FC = () => {
         </div>
       </Layout>
     );
-  }
-
-  if (user) {
-    return <Navigate to="/" />;
   }
 
   const handleSignIn = async (e: React.FormEvent) => {
@@ -56,6 +56,77 @@ const Auth: React.FC = () => {
       setIsSubmitting(false);
     }
   };
+  
+  const makeAdmin = async () => {
+    if (!user) return;
+    
+    setIsMakingAdmin(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('create-admin', {
+        body: { userId: user.id },
+      });
+      
+      if (error) {
+        throw error;
+      }
+      
+      toast({
+        title: "Success",
+        description: "You are now an admin! Please refresh the page to see admin features.",
+      });
+      
+      // Force reload to update admin status
+      window.location.reload();
+      
+    } catch (error: any) {
+      console.error("Error making admin:", error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to make user an admin",
+        variant: "destructive",
+      });
+    } finally {
+      setIsMakingAdmin(false);
+    }
+  };
+
+  if (user) {
+    return (
+      <Layout>
+        <div className="container mx-auto px-4 md:px-8 py-16 md:py-24">
+          <div className="max-w-md mx-auto">
+            <Card>
+              <CardHeader className="space-y-1">
+                <CardTitle className="text-2xl font-bold">Account</CardTitle>
+                <CardDescription>
+                  You are signed in as {user.email}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <p>What would you like to do?</p>
+                </div>
+              </CardContent>
+              <CardFooter className="flex justify-between">
+                <Button 
+                  onClick={() => navigate('/')}
+                  variant="outline"
+                >
+                  Go Home
+                </Button>
+                <Button 
+                  onClick={makeAdmin}
+                  disabled={isMakingAdmin}
+                >
+                  {isMakingAdmin ? "Processing..." : "Make Yourself Admin"}
+                </Button>
+              </CardFooter>
+            </Card>
+          </div>
+        </div>
+      </Layout>
+    );
+  }
 
   return (
     <Layout>
