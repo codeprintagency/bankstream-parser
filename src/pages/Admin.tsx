@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
@@ -12,7 +13,8 @@ import { useToast } from "@/components/ui/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-type UserRole = 'admin' | 'subscriber' | 'user';
+// Import the UserRole type from AuthContext to ensure consistency
+import type { UserRole } from "@/contexts/AuthContext";
 
 const Admin: React.FC = () => {
   const { user, isLoading, isAdmin, getToken } = useAuth();
