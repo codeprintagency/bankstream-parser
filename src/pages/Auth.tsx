@@ -12,7 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/components/ui/use-toast";
 
 const Auth: React.FC = () => {
-  const { user, isLoading, signIn, signUp } = useAuth();
+  const { user, isLoading, signIn, signUp, getToken } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -62,11 +62,20 @@ const Auth: React.FC = () => {
     
     setIsMakingAdmin(true);
     try {
+      // Get the access token to pass to the edge function
+      const token = await getToken();
+      if (!token) {
+        throw new Error("Could not get authentication token");
+      }
+      
       const { data, error } = await supabase.functions.invoke('create-admin', {
-        body: { userId: user.id },
+        headers: {
+          Authorization: `Bearer ${token}`
+        },
       });
       
       if (error) {
+        console.error("Function error:", error);
         throw error;
       }
       

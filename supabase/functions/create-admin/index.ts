@@ -1,7 +1,6 @@
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-// This is a one-time setup function that should be called manually to create the first admin
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -15,11 +14,7 @@ serve(async (req) => {
   }
   
   try {
-    const supabaseClient = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_ANON_KEY") ?? ""
-    );
-    
+    // Create a Supabase client with the Admin key
     const supabaseAdmin = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
@@ -30,70 +25,41 @@ serve(async (req) => {
         },
       }
     );
+    
+    // We still need a regular client to verify the JWT
+    const supabaseClient = createClient(
+      Deno.env.get("SUPABASE_URL") ?? "",
+      Deno.env.get("SUPABASE_ANON_KEY") ?? ""
+    );
 
-    const body = await req.json();
-    const { email, userId } = body;
-    
-    if (!email && !userId) {
-      return new Response(
-        JSON.stringify({ error: "Email or user ID is required" }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
+    // Verify the user is authenticated
+    const authHeader = req.headers.get('authorization');
+    if (!authHeader) {
+      throw new Error('Missing authorization header');
     }
     
-    let user;
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: authError } = await supabaseClient.auth.getUser(token);
     
-    // If userId is provided, use it directly
-    if (userId) {
-      const { data: userData, error: userError } = await supabaseAdmin.auth.admin.getUserById(userId);
-      
-      if (userError) {
-        throw userError;
-      }
-      
-      user = userData.user;
-    } 
-    // Otherwise use email to find or create user
-    else {
-      // Check if user exists
-      const { data: existingUsers, error: lookupError } = await supabaseAdmin.auth.admin.listUsers();
-      
-      if (lookupError) {
-        throw lookupError;
-      }
-      
-      user = existingUsers.users.find((u) => u.email === email);
-      
-      // If user doesn't exist, create them
-      if (!user) {
-        const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
-          email,
-          email_confirm: true,
-          password: crypto.randomUUID().substring(0, 8),
-        });
-        
-        if (createError) {
-          throw createError;
-        }
-        
-        user = newUser.user;
-      }
+    if (authError || !user) {
+      throw new Error('Invalid token or user not found');
     }
     
-    if (!user || !user.id) {
-      throw new Error("Failed to find or create user");
-    }
+    const userId = user.id;
+    console.log("Making user an admin:", userId);
     
     // Check if user is already an admin
-    const { data: existingRole } = await supabaseClient
+    const { data: existingRole, error: checkError } = await supabaseAdmin
       .from("user_roles")
       .select("*")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .eq("role", "admin")
       .single();
+    
+    if (checkError && checkError.code !== 'PGRST116') {
+      console.error("Error checking existing role:", checkError);
+      throw checkError;
+    }
     
     if (existingRole) {
       return new Response(
@@ -104,28 +70,30 @@ serve(async (req) => {
       );
     }
     
-    // Make user an admin
-    const { error: roleError } = await supabaseClient
+    // Use the admin client to insert the role bypassing RLS policies
+    const { error: roleError } = await supabaseAdmin
       .from("user_roles")
       .insert({
-        user_id: user.id,
+        user_id: userId,
         role: "admin",
       });
     
     if (roleError) {
+      console.error("Error inserting role:", roleError);
       throw roleError;
     }
     
     return new Response(
       JSON.stringify({
         message: "User has been made an admin successfully",
-        user,
+        user_id: userId,
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       }
     );
   } catch (error) {
+    console.error("Error in create-admin function:", error);
     return new Response(
       JSON.stringify({ error: error.message }),
       {
