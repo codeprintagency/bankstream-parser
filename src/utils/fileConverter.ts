@@ -1,6 +1,6 @@
 
 import { Transaction } from './transactions/types';
-import { extractTextFromPdf, reconstructTableRows } from './pdf/pdfProcessor';
+import { extractTextFromPdf } from './pdf/pdfProcessor';
 import { determineCategory } from './transactions/categoryDetector';
 import { generateExcelFile, downloadExcelFile } from './excel/excelExporter';
 

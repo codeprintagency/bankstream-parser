@@ -1,4 +1,3 @@
-
 // For TypeScript's benefit, declare what's available in the browser's localStorage
 declare global {
   interface Window {
@@ -11,62 +10,10 @@ import { determineCategory } from './transactions/categoryDetector';
 import { ApiService } from './ApiService';
 
 // Constants for local storage keys
-const PREMIUM_ACCESS_KEY = 'premium_access';
-const CLAUDE_API_KEY = 'claude_api_key';
 const LAST_HTML_RESPONSE_KEY = 'last_html_response';
 
 /**
- * Determines if premium access is enabled
- */
-export function hasPremiumAccess(): boolean {
-  try {
-    return localStorage.getItem(PREMIUM_ACCESS_KEY) === 'true';
-  } catch (e) {
-    console.error('Error accessing localStorage:', e);
-    return false;
-  }
-}
-
-/**
- * Toggles premium access state
- */
-export function togglePremiumAccess(): boolean {
-  try {
-    const currentState = hasPremiumAccess();
-    const newState = !currentState;
-    localStorage.setItem(PREMIUM_ACCESS_KEY, newState.toString());
-    return newState;
-  } catch (e) {
-    console.error('Error accessing localStorage:', e);
-    return false;
-  }
-}
-
-/**
- * Gets the Claude API key from localStorage
- */
-export function getClaudeApiKey(): string | null {
-  try {
-    return localStorage.getItem(CLAUDE_API_KEY);
-  } catch (e) {
-    console.error('Error accessing localStorage:', e);
-    return null;
-  }
-}
-
-/**
- * Sets the Claude API key in localStorage
- */
-export function setClaudeApiKey(apiKey: string): void {
-  try {
-    localStorage.setItem(CLAUDE_API_KEY, apiKey);
-  } catch (e) {
-    console.error('Error accessing localStorage:', e);
-  }
-}
-
-/**
- * Stores the last HTML response received from Claude API
+ * Stores the last HTML response received from API
  * @param htmlResponse - The HTML response to store
  */
 export function setLastHtmlResponse(htmlResponse: string): void {
@@ -91,15 +38,13 @@ export function getLastHtmlResponse(): string {
 }
 
 /**
- * Parses transactions from a bank statement using Claude AI
+ * Parses transactions from a bank statement using AI
  * 
  * @param data - Either PDF data as ArrayBuffer or extracted text content
- * @param apiKey - Claude API key
  * @param isDirectPdfUpload - Whether we're uploading the raw PDF (true) or sending extracted text (false)
  */
 export async function parseTransactionsWithAI(
   data: ArrayBuffer | string[], 
-  apiKey: string,
   isDirectPdfUpload: boolean = false
 ): Promise<Transaction[]> {
   try {
@@ -150,25 +95,24 @@ export async function parseTransactionsWithAI(
       if (Array.isArray(data)) {
         // Use the helper method to prepare the text-only request
         requestOptions = ApiService.prepareTextRequestOptions(data);
-        console.log("Using Claude-3 Haiku model for text extraction");
+        console.log("Using text extraction approach");
       } else {
         throw new Error("Invalid data format for text extraction approach");
       }
     }
     
-    console.log("Sending request to Claude with API key:", apiKey.substring(0, 10) + "...");
-    console.log("Using model:", requestOptions.model);
+    console.log("Sending request to AI");
     
     try {
       // Make the API request
-      const response = await ApiService.callClaudeApi(apiKey, requestOptions);
+      const response = await ApiService.callClaudeApi(requestOptions);
       
       if (!response || !response.content || !response.content.length) {
-        throw new Error("Invalid response from Claude AI");
+        throw new Error("Invalid response from AI");
       }
       
       const aiResponse = response.content[0].text;
-      console.log("Received response from Claude AI");
+      console.log("Received response from AI");
       console.log("Response content preview:", aiResponse.substring(0, 200) + "...");
       
       // Parse the AI response to extract transaction data

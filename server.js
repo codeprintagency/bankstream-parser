@@ -58,6 +58,12 @@ console.log('Environment detection:', {
   nodeEnv: process.env.NODE_ENV
 });
 
+// Add environment variables for Claude API
+const CLAUDE_API_KEY = process.env.CLAUDE_API_KEY || '';
+if (!CLAUDE_API_KEY && !process.env.CI) {
+  console.warn('⚠️  WARNING: No CLAUDE_API_KEY environment variable found. API requests will fail.');
+}
+
 // Add direct route handling for Claude API messages endpoint
 app.post('/api/claude/v1/messages', async (req, res) => {
   console.log('=== DIRECT CLAUDE API REQUEST ===');
@@ -81,25 +87,24 @@ app.post('/api/claude/v1/messages', async (req, res) => {
   console.log('Message count:', req.body.messages.length);
   console.log('Model:', req.body.model);
   
-  // Extract the API key from headers
-  const apiKey = req.headers['x-api-key'];
-  if (!apiKey) {
-    console.error('Missing x-api-key header');
-    return res.status(400).json({
+  // Use server-side API key instead of client-provided key
+  if (!CLAUDE_API_KEY) {
+    console.error('Missing Claude API key in server environment');
+    return res.status(500).json({
       error: {
-        type: 'auth_error',
-        message: 'Missing x-api-key header'
+        type: 'api_key_error',
+        message: 'Claude API key is not configured on the server'
       }
     });
   }
   
   try {
-    // Forward the request to Claude API
+    // Forward the request to Claude API with our API key
     const claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': apiKey,
+        'x-api-key': CLAUDE_API_KEY,
         'anthropic-version': req.headers['anthropic-version'] || '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true',
         ...(req.headers['anthropic-beta'] && {'anthropic-beta': req.headers['anthropic-beta']})
@@ -132,7 +137,7 @@ app.post('/api/claude/v1/messages', async (req, res) => {
   }
 });
 
-// Improved proxy middleware for Claude API with better error handling and extended timeout
+// Modify the proxy middleware to use server-side API key
 app.use('/api/claude', createProxyMiddleware({
   target: 'https://api.anthropic.com',
   changeOrigin: true,
@@ -141,8 +146,8 @@ app.use('/api/claude', createProxyMiddleware({
   },
   logLevel: 'debug',
   // Increase timeouts for PDF processing - critical fix for cloud environments
-  timeout: isCloudEnvironment ? 120000 : 60000, // 2 minutes for cloud, 1 minute for local
-  proxyTimeout: isCloudEnvironment ? 120000 : 60000, // 2 minutes for cloud, 1 minute for local
+  timeout: isCloudEnvironment ? 120000 : 60000,
+  proxyTimeout: isCloudEnvironment ? 120000 : 60000,
   onProxyReq: (proxyReq, req, res) => {
     console.log('=== PROXY REQUEST START ===');
     console.log('Original request URL:', req.url);
@@ -154,12 +159,12 @@ app.use('/api/claude', createProxyMiddleware({
     proxyReq.removeHeader('origin');
     proxyReq.removeHeader('referer');
     
-    // Always include essential headers
-    if (req.headers['x-api-key']) {
-      proxyReq.setHeader('x-api-key', req.headers['x-api-key']);
-      console.log('Setting x-api-key header:', req.headers['x-api-key'].substring(0, 10) + '...');
+    // Always use server-side API key
+    if (CLAUDE_API_KEY) {
+      proxyReq.setHeader('x-api-key', CLAUDE_API_KEY);
+      console.log('Setting x-api-key header from server environment');
     } else {
-      console.warn('WARNING: No x-api-key header found in request');
+      console.warn('WARNING: No Claude API key available in server environment');
     }
     
     // Set required Anthropic headers

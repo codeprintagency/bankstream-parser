@@ -2,19 +2,18 @@
 import React, { useState, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
-import { Upload, FileText, Check, AlertCircle, Zap, Bug, Key } from "lucide-react";
+import { Upload, FileText, Check, AlertCircle, Zap, Bug } from "lucide-react";
 import { downloadExcelFile, Transaction, extractTextFromPdf, prepareExtractedTextForAI } from "@/utils/fileConverter";
-import { parseTransactionsWithAI, hasPremiumAccess, togglePremiumAccess, getClaudeApiKey, setClaudeApiKey } from "@/utils/aiParser";
+import { parseTransactionsWithAI } from "@/utils/aiParser";
 import TransactionTable from "./TransactionTable";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
 import DebugModal from "./DebugModal";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ApiService } from "@/utils/ApiService";
 import { Badge } from "@/components/ui/badge";
-import { Info } from "lucide-react";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import PricingPlans from "./PricingPlans";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
+
+const FREE_PAGE_LIMIT = 1;
 
 const FileUpload: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
@@ -23,38 +22,11 @@ const FileUpload: React.FC = () => {
   const [isConverted, setIsConverted] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [directPdfUpload, setDirectPdfUpload] = useState(false);
-  const [isPremium, setIsPremium] = useState(() => hasPremiumAccess());
   const [debugModalOpen, setDebugModalOpen] = useState(false);
-  const [apiKeyPopoverOpen, setApiKeyPopoverOpen] = useState(false);
-  const [apiKey, setApiKey] = useState(() => getClaudeApiKey() || "");
   const [error, setError] = useState<string | null>(null);
-  const [claudeModel, setClaudeModel] = useState<string>("claude-3-haiku-20240307");
+  const [pricingDialogOpen, setPricingDialogOpen] = useState(false);
+  const [pageCount, setPageCount] = useState(0);
   const { toast } = useToast();
-
-  // Load API key from storage on component mount
-  useEffect(() => {
-    const savedKey = getClaudeApiKey();
-    if (savedKey) {
-      setApiKey(savedKey);
-    }
-  }, []);
-
-  const handleSaveApiKey = () => {
-    if (apiKey.trim()) {
-      setClaudeApiKey(apiKey.trim());
-      setApiKeyPopoverOpen(false);
-      toast({
-        title: "API Key Saved",
-        description: "Your Claude API key has been saved securely.",
-      });
-    } else {
-      toast({
-        title: "API Key Required",
-        description: "Please enter a valid API key.",
-        variant: "destructive",
-      });
-    }
-  };
 
   const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -95,16 +67,15 @@ const FileUpload: React.FC = () => {
     }
   }, [toast]);
 
-  const togglePremium = useCallback(() => {
-    const status = togglePremiumAccess();
-    setIsPremium(status);
-    toast({
-      title: status ? "Premium Activated" : "Premium Deactivated",
-      description: status 
-        ? "You now have access to AI parsing features" 
-        : "AI parsing features are now disabled",
-    });
-  }, [toast]);
+  const checkPageCount = async (file: File): Promise<number> => {
+    try {
+      const extractedItems = await extractTextFromPdf(file);
+      return extractedItems.length;
+    } catch (error) {
+      console.error("Failed to count pages:", error);
+      return 0;
+    }
+  };
 
   const handleConvert = useCallback(async () => {
     if (!file) return;
@@ -113,37 +84,22 @@ const FileUpload: React.FC = () => {
     setError(null);
     
     try {
-      // Check if premium access is available
-      if (!isPremium) {
-        toast({
-          title: "Premium Feature",
-          description: "AI parsing requires premium access. Enable it in settings.",
-          variant: "destructive",
-        });
-        setIsConverting(false);
-        return;
-      }
+      // Check page count
+      const numPages = await checkPageCount(file);
+      setPageCount(numPages);
       
-      // Check if API key is available
-      const currentApiKey = getClaudeApiKey();
-      if (!currentApiKey) {
-        setApiKeyPopoverOpen(true);
-        toast({
-          title: "API Key Required",
-          description: "Claude API key is required for AI parsing. Please enter your API key.",
-          variant: "destructive",
-        });
+      if (numPages > FREE_PAGE_LIMIT) {
+        setPricingDialogOpen(true);
         setIsConverting(false);
         return;
       }
       
       toast({
         title: "AI Processing",
-        description: `Sending to Claude AI for analysis${directPdfUpload ? " using direct PDF upload" : " using text extraction"}...`,
+        description: `Sending to AI for analysis${directPdfUpload ? " using direct PDF upload" : " using text extraction"}...`,
       });
       
       let aiExtractedTransactions;
-      let modelUsed = "claude-3-haiku-20240307";
       
       if (directPdfUpload) {
         // Direct PDF upload approach - send the raw PDF data
@@ -151,8 +107,7 @@ const FileUpload: React.FC = () => {
         console.log("Using direct PDF upload method, file size:", arrayBuffer.byteLength);
         
         // Use AI parsing with the raw PDF data
-        aiExtractedTransactions = await parseTransactionsWithAI(arrayBuffer, currentApiKey);
-        modelUsed = "claude-3-opus-20240229"; // Direct PDF uploads use the Opus model
+        aiExtractedTransactions = await parseTransactionsWithAI(arrayBuffer);
       } else {
         // Text extraction approach
         console.log("Using text extraction method");
@@ -160,20 +115,10 @@ const FileUpload: React.FC = () => {
         const extractedText = prepareExtractedTextForAI(extractedItems);
         console.log("Extracted text from PDF, total pages:", extractedText.length);
         
-        // Use text-only API request options
-        const requestOptions = ApiService.prepareTextRequestOptions(extractedText);
-        modelUsed = requestOptions.model;
-        console.log("Prepared text-only request for Claude using model:", modelUsed);
-        
-        // Make the API request directly with text content
-        const apiResponse = await ApiService.callClaudeApi(currentApiKey, requestOptions);
-        console.log("Received API response from Claude");
-        
-        // Parse the Claude response to extract transactions
-        aiExtractedTransactions = await parseTransactionsWithAI(extractedText, currentApiKey, false);
+        // Use AI parsing with the extracted text
+        aiExtractedTransactions = await parseTransactionsWithAI(extractedText, false);
       }
       
-      setClaudeModel(modelUsed);
       setTransactions(aiExtractedTransactions);
       
       toast({
@@ -186,13 +131,6 @@ const FileUpload: React.FC = () => {
       console.error("Conversion error:", error);
       setError(error.message || "Unknown error occurred");
       
-      // Check if error is related to API key
-      if (error.message?.includes("API key") || error.message?.includes("authorization") || 
-          error.message?.includes("auth") || error.message?.includes("unauthorized") ||
-          error.message?.toLowerCase().includes("token")) {
-        setApiKeyPopoverOpen(true);
-      }
-      
       toast({
         title: "Conversion Failed",
         description: error.message || "There was an error converting your file. Please try again.",
@@ -201,7 +139,7 @@ const FileUpload: React.FC = () => {
     } finally {
       setIsConverting(false);
     }
-  }, [file, toast, isPremium, directPdfUpload]);
+  }, [file, toast, directPdfUpload]);
 
   const handleDownload = useCallback(() => {
     if (transactions.length === 0) return;
@@ -235,24 +173,6 @@ const FileUpload: React.FC = () => {
             <Badge variant="outline" className="bg-gradient-to-r from-purple-500 to-indigo-600 text-white px-3 py-1">
               AI Powered
             </Badge>
-            
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div className="flex items-center text-sm text-muted-foreground">
-                    <span>Using Claude Model: {claudeModel}</span>
-                    <Info className="ml-1 w-4 h-4" />
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p className="text-xs">
-                    {directPdfUpload ? 
-                      "Direct PDF upload uses Claude Opus model for better document analysis" : 
-                      "Text extraction uses Claude Haiku model for faster processing"}
-                  </p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
           </div>
           
           <div className="flex items-center space-x-2">
@@ -268,51 +188,6 @@ const FileUpload: React.FC = () => {
                 {directPdfUpload && <FileText className="w-4 h-4 ml-1 text-blue-500" />}
               </Label>
             </div>
-            
-            <Popover open={apiKeyPopoverOpen} onOpenChange={setApiKeyPopoverOpen}>
-              <PopoverTrigger asChild>
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  className="flex items-center gap-1"
-                >
-                  <Key className="w-4 h-4" />
-                  <span>API Key</span>
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-80 p-4">
-                <div className="space-y-4">
-                  <h4 className="font-medium">Claude API Key</h4>
-                  <p className="text-sm text-muted-foreground">
-                    Enter your Claude API key to use AI parsing features.
-                    Keys are stored locally in your browser.
-                  </p>
-                  <div className="flex flex-col gap-2">
-                    <Input
-                      type="password"
-                      placeholder="sk-ant-api03-..."
-                      value={apiKey}
-                      onChange={(e) => setApiKey(e.target.value)}
-                    />
-                    <Button size="sm" onClick={handleSaveApiKey}>
-                      Save API Key
-                    </Button>
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-2">
-                    Need a key? <a href="https://console.anthropic.com/account/keys" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Get it from Anthropic Console</a>
-                  </div>
-                </div>
-              </PopoverContent>
-            </Popover>
-            
-            <Button 
-              variant="outline" 
-              size="sm" 
-              className={isPremium ? "bg-gradient-to-r from-yellow-400 to-yellow-600 text-white hover:from-yellow-500 hover:to-yellow-700" : ""}
-              onClick={togglePremium}
-            >
-              {isPremium ? "Premium Active" : "Enable Premium"}
-            </Button>
             
             <Button
               variant="outline"
@@ -382,13 +257,17 @@ const FileUpload: React.FC = () => {
           
           <p className="text-muted-foreground mb-6 max-w-lg">
             {isConverted 
-              ? `${transactions.length} transactions have been extracted from your statement using Claude AI` 
+              ? `${transactions.length} transactions have been extracted from your statement using AI` 
               : error
                 ? "An error occurred while processing your file. Check the debug information."
                 : file 
                   ? `Selected file: ${file.name} (${directPdfUpload ? "Direct PDF Upload" : "Text Extraction"})`
                   : "Drag and drop your PDF bank statement here, or click to browse files"
             }
+          </p>
+          
+          <p className="text-xs text-muted-foreground mb-4">
+            Free tier: Process up to {FREE_PAGE_LIMIT} page only. For larger documents, please subscribe.
           </p>
           
           {!file && !isConverted && !error && (
@@ -464,12 +343,27 @@ const FileUpload: React.FC = () => {
         
         <div className="mt-4 flex items-center justify-center text-xs text-muted-foreground">
           <AlertCircle className="w-3 h-3 mr-1" />
-          <span>Bank statements are processed securely with Claude AI and never stored on our servers</span>
+          <span>Bank statements are processed securely with AI and never stored on our servers</span>
         </div>
       </div>
       
-      {/* Debug Modal for showing the HTML response */}
+      {/* Debug Modal */}
       <DebugModal open={debugModalOpen} onOpenChange={setDebugModalOpen} />
+      
+      {/* Pricing Plans Dialog */}
+      <Dialog open={pricingDialogOpen} onOpenChange={setPricingDialogOpen}>
+        <DialogContent className="sm:max-w-4xl">
+          <div className="py-4">
+            <h2 className="text-2xl font-bold text-center mb-6">
+              Your document has {pageCount} pages
+            </h2>
+            <p className="text-center mb-8">
+              The free tier supports only {FREE_PAGE_LIMIT} page. Please subscribe to a plan to process larger documents.
+            </p>
+            <PricingPlans onSelectPlan={() => setPricingDialogOpen(false)} />
+          </div>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 };
