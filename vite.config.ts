@@ -10,6 +10,10 @@ export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
     port: 8080,
+    allowedHosts: [
+      "2f1eb924-50e1-4078-8836-1c0d85049071.lovableproject.com",
+      "localhost"
+    ],
     proxy: {
       // Proxy API requests to avoid CORS issues
       '/api/claude': {
